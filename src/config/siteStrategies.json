@@ -1,0 +1,41 @@
+{
+  "_comment": "این فایل شامل تنظیمات CSS Selectors برای هر سایت است",
+  "_structure": {
+    "domain": {
+      "name": "نام سایت",
+      "galleries": {
+        "selector": "CSS selector برای لینک‌های گالری در صفحه Model",
+        "attr": "نام attribute برای استخراج URL (معمولاً href)"
+      },
+      "images": {
+        "selector": "CSS selector برای لینک‌های عکس در گالری",
+        "attr": "نام attribute برای استخراج URL عکس (href یا src)",
+        "filterPatterns": ["آرایه‌ای از الگوها برای فیلتر کردن thumbnailها"]
+      }
+    }
+  },
+  "elitebabes.com": {
+    "name": "EliteBabes",
+    "galleries": {
+      "selector": "a.gallery-link",
+      "attr": "href"
+    },
+    "images": {
+      "selector": "a[href*='cdn'][href$='.jpg']",
+      "attr": "href",
+      "filterPatterns": ["thumb", "_w400", "_w600", "masonry", "logo"]
+    }
+  },
+  "definebabe.com": {
+    "name": "DefineBabe",
+    "galleries": {
+      "selector": "article.gallery-item a",
+      "attr": "href"
+    },
+    "images": {
+      "selector": "a[itemprop='contentUrl']",
+      "attr": "href",
+      "filterPatterns": [".webp", "_.", "masonry", "thumb", "-150x"]
+    }
+  }
+}
