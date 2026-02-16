@@ -17,7 +17,7 @@
   "elitebabes.com": {
     "name": "EliteBabes",
     "galleries": {
-      "selector": "ul.list-gallery li figure a",
+      "selector": "ul.list-gallery > li > figure > a:nth-child(1)",
       "attr": "href"
     },
     "images": {
