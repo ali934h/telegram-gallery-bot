@@ -1,0 +1,493 @@
+/**
+ * Telegram Bot Logic
+ * Handles user interactions, menu, commands, and orchestrates scraping/downloading
+ */
+
+const { Telegraf, Markup } = require('telegraf');
+const path = require('path');
+const Logger = require('./utils/logger');
+const FileManager = require('./utils/fileManager');
+const strategyEngine = require('./scrapers/strategyEngine');
+const JsdomScraper = require('./scrapers/jsdomScraper');
+const PuppeteerScraper = require('./scrapers/puppeteerScraper');
+const ImageDownloader = require('./downloaders/imageDownloader');
+const ZipCreator = require('./downloaders/zipCreator');
+
+// Bot states
+const STATE = {
+  IDLE: 'idle',
+  WAITING_SINGLE_URL: 'waiting_single_url',
+  WAITING_MULTI_URL: 'waiting_multi_url',
+  PROCESSING: 'processing'
+};
+
+// User sessions
+const userSessions = new Map();
+
+class TelegramBot {
+  constructor(token) {
+    this.bot = new Telegraf(token);
+    this.setupHandlers();
+  }
+
+  /**
+   * Get or create user session
+   */
+  getUserSession(userId) {
+    if (!userSessions.has(userId)) {
+      userSessions.set(userId, { state: STATE.IDLE });
+    }
+    return userSessions.get(userId);
+  }
+
+  /**
+   * Main menu keyboard
+   */
+  getMainMenu() {
+    return Markup.keyboard([
+      ['📸 Single Gallery', '📚 Multi Gallery'],
+      ['ℹ️ Help', '🔄 Restart']
+    ]).resize();
+  }
+
+  /**
+   * Setup all bot handlers
+   */
+  setupHandlers() {
+    // Start command
+    this.bot.start((ctx) => {
+      Logger.info(`User started bot: ${ctx.from.id}`);
+      const session = this.getUserSession(ctx.from.id);
+      session.state = STATE.IDLE;
+
+      ctx.reply(
+        '👋 Welcome to Gallery Downloader Bot!\n\n' +
+        'Choose a download mode:\n\n' +
+        '📸 *Single Gallery*: Download one gallery\n' +
+        '📚 *Multi Gallery*: Download all galleries from a model page\n\n' +
+        'Select an option below:',
+        { parse_mode: 'Markdown', ...this.getMainMenu() }
+      );
+    });
+
+    // Help command
+    this.bot.command('help', (ctx) => {
+      ctx.reply(
+        '📚 *How to use this bot:*\n\n' +
+        '*Single Gallery Mode:*\n' +
+        '1. Click "📸 Single Gallery"\n' +
+        '2. Send the gallery URL\n' +
+        '3. Wait for download\n' +
+        '4. Receive ZIP file\n\n' +
+        '*Multi Gallery Mode:*\n' +
+        '1. Click "📚 Multi Gallery"\n' +
+        '2. Send the model page URL\n' +
+        '3. Confirm number of galleries\n' +
+        '4. Wait for download\n' +
+        '5. Receive ZIP file\n\n' +
+        '*Supported Sites:*\n' +
+        strategyEngine.getSupportedDomains().map(d => `• ${d}`).join('\n'),
+        { parse_mode: 'Markdown' }
+      );
+    });
+
+    // Single Gallery button
+    this.bot.hears('📸 Single Gallery', (ctx) => {
+      const session = this.getUserSession(ctx.from.id);
+      session.state = STATE.WAITING_SINGLE_URL;
+
+      ctx.reply(
+        '📸 *Single Gallery Mode*\n\n' +
+        'Please send the gallery URL you want to download.\n\n' +
+        'Example: https://example.com/gallery/gallery-name',
+        { parse_mode: 'Markdown' }
+      );
+    });
+
+    // Multi Gallery button
+    this.bot.hears('📚 Multi Gallery', (ctx) => {
+      const session = this.getUserSession(ctx.from.id);
+      session.state = STATE.WAITING_MULTI_URL;
+
+      ctx.reply(
+        '📚 *Multi Gallery Mode*\n\n' +
+        'Please send the model page URL to download all galleries.\n\n' +
+        'Example: https://example.com/model/model-name',
+        { parse_mode: 'Markdown' }
+      );
+    });
+
+    // Restart button
+    this.bot.hears('🔄 Restart', (ctx) => {
+      const session = this.getUserSession(ctx.from.id);
+      session.state = STATE.IDLE;
+      ctx.reply('✅ Bot restarted! Choose a mode:', this.getMainMenu());
+    });
+
+    // Help button
+    this.bot.hears('ℹ️ Help', (ctx) => {
+      ctx.reply(
+        '📚 *How to use this bot:*\n\n' +
+        '*Single Gallery Mode:*\n' +
+        '1. Click "📸 Single Gallery"\n' +
+        '2. Send the gallery URL\n' +
+        '3. Wait for download\n' +
+        '4. Receive ZIP file\n\n' +
+        '*Multi Gallery Mode:*\n' +
+        '1. Click "📚 Multi Gallery"\n' +
+        '2. Send the model page URL\n' +
+        '3. Confirm number of galleries\n' +
+        '4. Wait for download\n' +
+        '5. Receive ZIP file',
+        { parse_mode: 'Markdown' }
+      );
+    });
+
+    // URL message handler
+    this.bot.on('text', async (ctx) => {
+      const session = this.getUserSession(ctx.from.id);
+      const url = ctx.message.text;
+
+      // Ignore if not waiting for URL
+      if (session.state !== STATE.WAITING_SINGLE_URL && session.state !== STATE.WAITING_MULTI_URL) {
+        return;
+      }
+
+      // Validate URL
+      if (!url.startsWith('http')) {
+        ctx.reply('❌ Invalid URL. Please send a valid URL starting with http:// or https://');
+        return;
+      }
+
+      // Check if site is supported
+      if (!strategyEngine.isSupported(url)) {
+        const domain = strategyEngine.extractDomain(url);
+        ctx.reply(
+          `❌ Sorry, ${domain} is not supported yet.\n\n` +
+          '*Supported sites:*\n' +
+          strategyEngine.getSupportedDomains().map(d => `• ${d}`).join('\n'),
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      // Process based on mode
+      if (session.state === STATE.WAITING_SINGLE_URL) {
+        await this.processSingleGallery(ctx, url);
+      } else if (session.state === STATE.WAITING_MULTI_URL) {
+        await this.processMultiGallery(ctx, url);
+      }
+    });
+
+    // Error handler
+    this.bot.catch((err, ctx) => {
+      Logger.error('Bot error', { error: err.message, user: ctx.from?.id });
+      ctx.reply('❌ An error occurred. Please try again or use /start to restart.');
+      const session = this.getUserSession(ctx.from.id);
+      session.state = STATE.IDLE;
+    });
+  }
+
+  /**
+   * Process single gallery download
+   */
+  async processSingleGallery(ctx, url) {
+    const session = this.getUserSession(ctx.from.id);
+    session.state = STATE.PROCESSING;
+
+    const statusMsg = await ctx.reply('⏳ Processing... Please wait.');
+    let tempDir;
+
+    try {
+      // Get strategy
+      const strategy = strategyEngine.getStrategy(url);
+      
+      // Extract images
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '🔍 Extracting image URLs...'
+      );
+      const imageUrls = await JsdomScraper.extractImages(url, strategy);
+
+      if (imageUrls.length === 0) {
+        throw new Error('No images found in gallery');
+      }
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `✅ Found ${imageUrls.length} images\n📥 Downloading...`
+      );
+
+      // Create temp directory
+      tempDir = await FileManager.createTempDir('single_gallery');
+      const galleryName = JsdomScraper.extractGalleryName(url);
+
+      // Download images
+      const downloadResult = await ImageDownloader.downloadImages(
+        imageUrls,
+        tempDir,
+        5,
+        (progress) => {
+          // Update progress every 5 images
+          if (progress.current % 5 === 0 || progress.current === progress.total) {
+            ctx.telegram.editMessageText(
+              ctx.chat.id,
+              statusMsg.message_id,
+              null,
+              `📥 Downloading: ${progress.current}/${progress.total}\n` +
+              `✅ Success: ${progress.success} | ❌ Failed: ${progress.failed}`
+            ).catch(() => {}); // Ignore edit errors
+          }
+        }
+      );
+
+      if (downloadResult.success === 0) {
+        throw new Error('Failed to download any images');
+      }
+
+      // Create ZIP
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '📦 Creating ZIP file...'
+      );
+      const zipPath = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
+
+      // Send ZIP file
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '📤 Uploading...'
+      );
+
+      await ctx.replyWithDocument(
+        { source: zipPath },
+        {
+          caption:
+            `✅ *Download Complete!*\n\n` +
+            `📋 Gallery: ${galleryName}\n` +
+            `📷 Images: ${downloadResult.success}/${downloadResult.total}\n` +
+            `📦 Size: ${await FileManager.getFileSize(zipPath).then(s => FileManager.formatBytes(s))}`,
+          parse_mode: 'Markdown'
+        }
+      );
+
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+
+      // Cleanup
+      await FileManager.deleteDir(tempDir);
+      await FileManager.deleteFile(zipPath);
+
+      session.state = STATE.IDLE;
+      ctx.reply('Ready for next download!', this.getMainMenu());
+
+    } catch (error) {
+      Logger.error('Single gallery processing failed', { error: error.message, url });
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Error: ${error.message}\n\nPlease try again.`
+      );
+
+      if (tempDir) {
+        await FileManager.deleteDir(tempDir);
+      }
+
+      session.state = STATE.IDLE;
+    }
+  }
+
+  /**
+   * Process multi-gallery download
+   */
+  async processMultiGallery(ctx, url) {
+    const session = this.getUserSession(ctx.from.id);
+    session.state = STATE.PROCESSING;
+
+    const statusMsg = await ctx.reply('⏳ Processing... This may take a while.');
+    let tempDir;
+
+    try {
+      // Get strategy
+      const strategy = strategyEngine.getStrategy(url);
+
+      // Extract gallery links
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '🌐 Opening page and extracting galleries...\nThis may take 1-2 minutes.'
+      );
+      const galleryLinks = await PuppeteerScraper.extractGalleryLinks(url, strategy);
+
+      if (galleryLinks.length === 0) {
+        throw new Error('No galleries found on this page');
+      }
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `✅ Found ${galleryLinks.length} galleries!\n\n🔍 Extracting images from each gallery...`
+      );
+
+      // Extract images from each gallery
+      const galleries = [];
+      for (let i = 0; i < galleryLinks.length; i++) {
+        const galleryUrl = galleryLinks[i];
+        const galleryName = JsdomScraper.extractGalleryName(galleryUrl);
+
+        try {
+          const imageUrls = await JsdomScraper.extractImages(galleryUrl, strategy);
+          galleries.push({ name: galleryName, urls: imageUrls });
+
+          // Update progress
+          if ((i + 1) % 5 === 0 || i === galleryLinks.length - 1) {
+            await ctx.telegram.editMessageText(
+              ctx.chat.id,
+              statusMsg.message_id,
+              null,
+              `🔍 Extracting images: ${i + 1}/${galleryLinks.length} galleries processed`
+            ).catch(() => {});
+          }
+        } catch (error) {
+          Logger.warn(`Failed to extract gallery: ${galleryUrl}`, { error: error.message });
+        }
+      }
+
+      const totalImages = galleries.reduce((sum, g) => sum + g.urls.length, 0);
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `✅ Extraction complete!\n\n` +
+        `📋 Galleries: ${galleries.length}\n` +
+        `📷 Total Images: ${totalImages}\n\n` +
+        `📥 Starting download...`
+      );
+
+      // Create temp directory
+      tempDir = await FileManager.createTempDir('multi_gallery');
+      const modelName = strategyEngine.extractDomain(url).split('.')[0];
+
+      // Download all galleries
+      await ImageDownloader.downloadMultipleGalleries(
+        galleries,
+        tempDir,
+        (progress) => {
+          ctx.telegram.editMessageText(
+            ctx.chat.id,
+            statusMsg.message_id,
+            null,
+            `📥 Downloading gallery: ${progress.completedGalleries + 1}/${progress.totalGalleries}\n` +
+            `📋 Current: ${progress.galleryName}\n` +
+            `📷 Progress: ${progress.galleryProgress.current}/${progress.galleryProgress.total}`
+          ).catch(() => {});
+        }
+      );
+
+      // Create ZIP
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '📦 Creating ZIP file... (This may take a few minutes)'
+      );
+      const zipPath = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
+
+      // Send ZIP file
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        '📤 Uploading... (Large files may take time)'
+      );
+
+      await ctx.replyWithDocument(
+        { source: zipPath },
+        {
+          caption:
+            `✅ *Multi-Gallery Download Complete!*\n\n` +
+            `📋 Galleries: ${galleries.length}\n` +
+            `📷 Total Images: ${totalImages}\n` +
+            `📦 Size: ${await FileManager.getFileSize(zipPath).then(s => FileManager.formatBytes(s))}`,
+          parse_mode: 'Markdown'
+        }
+      );
+
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+
+      // Cleanup
+      await FileManager.deleteDir(tempDir);
+      await FileManager.deleteFile(zipPath);
+
+      session.state = STATE.IDLE;
+      ctx.reply('Ready for next download!', this.getMainMenu());
+
+    } catch (error) {
+      Logger.error('Multi-gallery processing failed', { error: error.message, url });
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        null,
+        `❌ Error: ${error.message}\n\nPlease try again.`
+      );
+
+      if (tempDir) {
+        await FileManager.deleteDir(tempDir);
+      }
+
+      session.state = STATE.IDLE;
+    }
+  }
+
+  /**
+   * Initialize bot (load strategies and start polling)
+   */
+  async initialize() {
+    try {
+      // Load strategies
+      await strategyEngine.loadStrategies();
+      Logger.info('Bot initialized successfully');
+    } catch (error) {
+      Logger.error('Failed to initialize bot', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Start bot with webhook
+   */
+  async startWebhook(webhookDomain, path, port) {
+    await this.initialize();
+    
+    // Set webhook
+    await this.bot.telegram.setWebhook(`${webhookDomain}${path}`);
+    Logger.info(`Webhook set: ${webhookDomain}${path}`);
+
+    return this.bot;
+  }
+
+  /**
+   * Start bot with polling (for development)
+   */
+  async startPolling() {
+    await this.initialize();
+    await this.bot.launch();
+    Logger.info('Bot started with polling');
+
+    // Graceful shutdown
+    process.once('SIGINT', () => this.bot.stop('SIGINT'));
+    process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
+  }
+}
+
+module.exports = TelegramBot;
