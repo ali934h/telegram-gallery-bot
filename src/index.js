@@ -12,7 +12,8 @@ const FileManager = require('./utils/fileManager');
 // Configuration
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const WEBHOOK_DOMAIN = process.env.WEBHOOK_DOMAIN;
+const WEBHOOK_PATH = process.env.WEBHOOK_PATH || '/webhook';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Validate environment
@@ -21,8 +22,8 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-if (NODE_ENV === 'production' && !WEBHOOK_URL) {
-  Logger.error('WEBHOOK_URL is required in production mode');
+if (NODE_ENV === 'production' && !WEBHOOK_DOMAIN) {
+  Logger.error('WEBHOOK_DOMAIN is required in production mode');
   process.exit(1);
 }
 
@@ -56,9 +57,10 @@ const bot = new TelegramBot(BOT_TOKEN);
 // Start server based on environment
 if (NODE_ENV === 'production') {
   // Production: Use webhook
-  const webhookPath = `/webhook/${BOT_TOKEN}`;
+  const webhookPath = `${WEBHOOK_PATH}/${BOT_TOKEN}`;
+  const webhookUrl = `${WEBHOOK_DOMAIN}${webhookPath}`;
 
-  bot.startWebhook(WEBHOOK_URL, webhookPath, PORT)
+  bot.startWebhook(WEBHOOK_DOMAIN, webhookPath, PORT)
     .then((botInstance) => {
       // Setup webhook endpoint
       app.use(botInstance.webhookCallback(webhookPath));
@@ -66,7 +68,7 @@ if (NODE_ENV === 'production') {
       // Start Express server
       app.listen(PORT, () => {
         Logger.info(`Server started in PRODUCTION mode on port ${PORT}`);
-        Logger.info(`Webhook URL: ${WEBHOOK_URL}${webhookPath}`);
+        Logger.info(`Webhook URL: ${webhookUrl}`);
 
         // Schedule cleanup of old temp files
         setInterval(() => {
