@@ -17,7 +17,6 @@ A professional Telegram bot for automated gallery image downloading from various
 - 🐳 **Docker Ready**: Easy deployment and scaling
 - 🔒 **SSL Support**: Secure webhook with Cloudflare
 - 🔄 **Auto Cleanup**: Automatic temporary file management
-- 🔥 **Hot Reload**: Development mode with instant code changes
 
 ## 🏗️ Project Architecture
 
@@ -39,11 +38,8 @@ telegram-gallery-bot/
 ├── strategies/                     # Site configurations (JSON)
 ├── ssl/                            # SSL certificates (not in repo)
 ├── temp/                           # Temporary files
-├── docker-compose.yml             # Production mode
-├── docker-compose.dev.yml         # Development mode (hot reload)
-├── nginx.conf                      # Production nginx config
-├── nginx.dev.conf                  # Development nginx config
-├── nodemon.json                   # Nodemon configuration
+├── docker-compose.yml             # Docker configuration
+├── nginx.conf                      # Nginx configuration
 ├── Dockerfile
 └── .env
 ```
@@ -56,23 +52,23 @@ telegram-gallery-bot/
 
 - Docker and Docker Compose
 - A Telegram bot token (from [@BotFather](https://t.me/botfather))
-- Domain with SSL (required for webhook)
-- Cloudflare Origin CA certificate (for HTTPS)
+- Domain with SSL certificate
+- Cloudflare Origin CA certificate
 
 ### Installation
 
-1. **Clone the repository**:
+**1. Clone the repository:**
 ```bash
 git clone https://github.com/ali934h/telegram-gallery-bot.git
 cd telegram-gallery-bot
 ```
 
-2. **Setup SSL certificates**:
+**2. Setup SSL certificates:**
 ```bash
 # Create ssl directory
 mkdir ssl
 
-# Get Cloudflare Origin CA certificate
+# Get Cloudflare Origin CA certificate:
 # Go to: Cloudflare Dashboard → SSL/TLS → Origin Server → Create Certificate
 # Download cert.pem and key.pem
 
@@ -84,214 +80,35 @@ cp /path/to/key.pem ssl/
 chmod 600 ssl/*.pem
 ```
 
-3. **Configure environment variables**:
+**3. Configure environment variables:**
 ```bash
 cp .env.example .env
-nano .env  # Add your BOT_TOKEN and other settings
+nano .env
 ```
 
-4. **Choose your mode**:
-
-#### 🔥 Development Mode (Hot Reload - Recommended for Development)
-```bash
-# Start with hot reload
-docker-compose -f docker-compose.dev.yml up -d
-
-# View logs
-docker-compose -f docker-compose.dev.yml logs -f bot
+**Required settings in `.env`:**
+```env
+BOT_TOKEN=your_telegram_bot_token
+WEBHOOK_DOMAIN=https://your-domain.com
+DOWNLOAD_BASE_URL=https://your-domain.com/downloads
+NODE_ENV=production
 ```
 
-**✨ Benefits:**
-- ✅ Code changes auto-reload instantly
-- ✅ Strategy changes auto-reload
-- ✅ No rebuild needed!
-- ⚡ 1-second restart time
-
-#### 🚀 Production Mode (Stable for Deployment)
+**4. Start the bot:**
 ```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f bot
-```
-
----
-
-## 📚 Complete Development Workflow Guide
-
-### 🔥 Scenario 1: Code Changes (src/ or strategies/)
-
-**This is 99% of your work!**
-
-#### Initial Setup (One Time)
-```bash
-# Start dev mode
-docker-compose -f docker-compose.dev.yml up -d
-```
-
-#### Daily Workflow
-```bash
-# 1. Edit code locally
-nano src/bot.js
-# or
-nano strategies/elitebabes.json
-
-# 2. Save file
-# ✨ Bot auto-restarts in 1 second!
-
-# 3. Check logs to confirm restart
-docker-compose -f docker-compose.dev.yml logs -f bot
-# You'll see: [nodemon] restarting due to changes...
-```
-
-**No rebuild, no restart command needed!** 🎉
-
----
-
-### 🔄 Scenario 2: Pull Changes from GitHub
-
-**When you push from laptop and pull on server:**
-
-```bash
-# 1. Pull latest changes
-git pull
-
-# 2. That's it! Nodemon detects and restarts!
-# ✨ Auto-reload in 1 second
-
-# 3. Check logs
-docker-compose -f docker-compose.dev.yml logs -f bot
-```
-
-**Works for:**
-- ✅ `src/**/*.js` changes
-- ✅ `strategies/**/*.json` changes
-- ✅ Any code modifications
-
-**No rebuild needed!** 🚀
-
----
-
-### 📦 Scenario 3: Adding New npm Package
-
-**When package.json changes:**
-
-```bash
-# 1. Pull changes (or edit locally)
-git pull
-
-# 2. Install new packages inside container
-docker-compose -f docker-compose.dev.yml exec bot npm install
-
-# 3. Restart bot
-docker-compose -f docker-compose.dev.yml restart bot
-
-# 4. Check logs
-docker-compose -f docker-compose.dev.yml logs -f bot
-```
-
-**Time: ~10-30 seconds** (no full rebuild!)
-
----
-
-### 🔧 Scenario 4: Dockerfile or System Changes
-
-**Only when these files change:**
-- `Dockerfile`
-- System packages (apt-get install)
-- Base image changes
-
-```bash
-# Stop containers
-docker-compose -f docker-compose.dev.yml down
-
-# Rebuild
-docker-compose -f docker-compose.dev.yml build --no-cache
-
-# Start
-docker-compose -f docker-compose.dev.yml up -d
-
-# Check logs
-docker-compose -f docker-compose.dev.yml logs -f bot
-```
-
-**Time: ~2-3 minutes** (rare scenario)
-
----
-
-### 🔄 Scenario 5: Switch Between Dev and Production
-
-#### Dev → Production
-```bash
-# Stop dev mode
-docker-compose -f docker-compose.dev.yml down
-
-# Start production
 docker-compose up -d
 ```
 
-#### Production → Dev
+**5. Set webhook:**
 ```bash
-# Stop production
-docker-compose down
-
-# Start dev mode
-docker-compose -f docker-compose.dev.yml up -d
+curl -X POST https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook \
+  -d "url=https://your-domain.com/webhook/<YOUR_BOT_TOKEN>"
 ```
 
----
-
-### 🔍 Scenario 6: Debugging Issues
-
-#### View Logs
+**6. Verify webhook:**
 ```bash
-# Real-time logs (dev mode)
-docker-compose -f docker-compose.dev.yml logs -f bot
-
-# Real-time logs (production)
-docker-compose logs -f bot
-
-# Last 100 lines
-docker-compose -f docker-compose.dev.yml logs --tail=100 bot
+curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
 ```
-
-#### Enter Container Shell
-```bash
-# Dev mode
-docker-compose -f docker-compose.dev.yml exec bot sh
-
-# Production mode
-docker-compose exec bot sh
-
-# Inside container, you can:
-ls -la /app/src
-cat /app/strategies/elitebabes.json
-node --version
-npm list
-```
-
-#### Check Container Status
-```bash
-# Dev mode
-docker-compose -f docker-compose.dev.yml ps
-
-# Production mode
-docker-compose ps
-```
-
----
-
-## 📝 Summary Table
-
-| Scenario | Dev Mode | Time | Production Mode | Time |
-|----------|----------|------|-----------------|------|
-| **Code changes** (src/, strategies/) | `git pull` | 1 sec | `git pull` + rebuild | 2-3 min |
-| **New npm package** | `npm install` in container | 10-30 sec | Full rebuild | 2-3 min |
-| **Dockerfile changes** | Rebuild | 2-3 min | Rebuild | 2-3 min |
-| **Daily development** | Edit & save | 1 sec | Edit, rebuild, restart | 2-3 min |
-
-**Recommendation:** Use Dev Mode for development, Production for deployment! 🚀
 
 ---
 
@@ -300,10 +117,27 @@ docker-compose ps
 ### Environment Variables (.env)
 
 ```env
+# Telegram Bot Configuration
 BOT_TOKEN=your_telegram_bot_token_here
+
+# Webhook Configuration
 WEBHOOK_DOMAIN=https://your-domain.com
-DOWNLOAD_BASE_URL=https://your-domain.com/downloads
+WEBHOOK_PATH=/webhook
+
+# Server Configuration
+PORT=3000
 NODE_ENV=production
+
+# Direct Download Configuration
+DOWNLOADS_DIR=/app/downloads
+DOWNLOAD_BASE_URL=https://your-domain.com/downloads
+
+# Optional: Timeout settings (in seconds)
+DOWNLOAD_TIMEOUT=300
+SCRAPE_TIMEOUT=60
+
+# Logging
+LOG_LEVEL=info
 ```
 
 ### SSL Certificates Setup
@@ -343,9 +177,12 @@ NODE_ENV=production
 }
 ```
 
-**In dev mode:** Just save and bot auto-reloads! 🔥
-
-**In production:** Rebuild needed.
+After adding a new strategy, rebuild and restart:
+```bash
+docker-compose down
+docker-compose build
+docker-compose up -d
+```
 
 ---
 
@@ -353,8 +190,8 @@ NODE_ENV=production
 
 1. Start the bot: `/start`
 2. Choose mode:
-   - 📸 **Single Gallery**: One gallery
-   - 📚 **Multi Gallery**: All galleries from model page
+   - 📸 **Single Gallery**: Download one gallery
+   - 📚 **Multi Gallery**: Download all galleries from model page
 3. Send URL
 4. Download your 7z file! 🎉
 
@@ -385,62 +222,40 @@ model-name_galleries_timestamp.7z
 
 ---
 
-## 🐳 Docker Commands Reference
-
-### Development Mode
+## 🐳 Docker Commands
 
 ```bash
-# Start
-docker-compose -f docker-compose.dev.yml up -d
-
-# Stop
-docker-compose -f docker-compose.dev.yml down
-
-# Restart bot only
-docker-compose -f docker-compose.dev.yml restart bot
-
-# View logs
-docker-compose -f docker-compose.dev.yml logs -f bot
-
-# Rebuild (rare)
-docker-compose -f docker-compose.dev.yml build --no-cache
-docker-compose -f docker-compose.dev.yml up -d
-
-# Install npm package
-docker-compose -f docker-compose.dev.yml exec bot npm install
-
-# Shell access
-docker-compose -f docker-compose.dev.yml exec bot sh
-
-# Check status
-docker-compose -f docker-compose.dev.yml ps
-```
-
-### Production Mode
-
-```bash
-# Start
+# Start services
 docker-compose up -d
 
-# Stop
+# Stop services
 docker-compose down
 
-# Restart
-docker-compose restart bot
+# View logs
+docker-compose logs -f
 
-# Rebuild
+# View bot logs only
+docker-compose logs -f bot
+
+# View nginx logs only
+docker-compose logs -f nginx
+
+# Restart services
+docker-compose restart
+
+# Rebuild after code changes
 docker-compose down
 docker-compose build --no-cache
 docker-compose up -d
 
-# View logs
-docker-compose logs -f bot
-
-# Shell access
-docker-compose exec bot sh
-
 # Check status
 docker-compose ps
+
+# Enter bot container
+docker-compose exec bot sh
+
+# Enter nginx container
+docker-compose exec nginx sh
 ```
 
 ---
@@ -451,8 +266,9 @@ docker-compose ps
 
 1. **Create Droplet** with Docker (Ubuntu 22.04/24.04)
 2. **Configure DNS** in Cloudflare
-3. **Get SSL certificates** from Cloudflare (see SSL Setup above)
+3. **Get SSL certificates** from Cloudflare Origin CA
 4. **Clone and configure**:
+
 ```bash
 git clone https://github.com/ali934h/telegram-gallery-bot.git
 cd telegram-gallery-bot
@@ -466,7 +282,7 @@ cp .env.example .env
 nano .env  # Add BOT_TOKEN, WEBHOOK_DOMAIN, etc.
 ```
 
-5. **Start in production mode**:
+5. **Start services**:
 ```bash
 docker-compose up -d
 ```
@@ -495,7 +311,7 @@ curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
 - **7zip**: Archive creation
 - **Docker**: Containerization
 - **Nginx**: Reverse proxy with SSL
-- **Nodemon**: Hot reload (development)
+- **Cloudflare**: SSL and CDN
 
 ---
 
@@ -516,12 +332,6 @@ curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
 - Multi gallery: Each gallery in separate folder
 - Organized and easy to navigate
 
-### Development Experience
-- 🔥 Hot reload with nodemon
-- 📁 Bind mounts for instant updates
-- 🚀 No rebuild for code changes
-- ⚡ 1-second restart time
-
 ---
 
 ## 🚨 Troubleshooting
@@ -530,100 +340,72 @@ curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
 
 **Symptoms:** Cloudflare shows "Error 521" when accessing download links.
 
-**Causes:**
-1. Nginx container is not running
-2. SSL certificates are missing or incorrectly mounted
-3. Wrong container name in nginx config
-
 **Solutions:**
 
 ```bash
-# 1. Check container status
-docker-compose -f docker-compose.dev.yml ps
+# Check container status
+docker-compose ps
 
-# 2. Check nginx logs
-docker-compose -f docker-compose.dev.yml logs nginx
+# Check nginx logs
+docker-compose logs nginx
 
-# 3. Verify SSL certificates exist
+# Verify SSL certificates exist
 ls -la ssl/
-# Should show: cert.pem and key.pem
 
-# 4. Verify SSL mount in docker-compose
-cat docker-compose.dev.yml | grep ssl
-# Should show: - ./ssl:/etc/ssl/cloudflare:ro
-
-# 5. Restart services
-docker-compose -f docker-compose.dev.yml down
-docker-compose -f docker-compose.dev.yml up -d
+# Restart services
+docker-compose restart
 ```
 
-### Bot Container Unhealthy
+### Bot Not Responding
 
-**Check logs:**
 ```bash
-docker-compose -f docker-compose.dev.yml logs --tail=50 bot
+# Check logs
+docker-compose logs bot
+
+# Check webhook status
+curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
+
+# Restart bot
+docker-compose restart bot
 ```
-
-**Common fixes:**
-- Missing environment variables in `.env`
-- Bot token invalid
-- Port 3000 already in use
-
-### Nginx Cannot Find Bot
-
-**Error:** `host not found in upstream "telegram-gallery-bot"`
-
-**Cause:** Wrong container name in nginx config.
-
-**Solution:**
-- Dev mode uses: `nginx.dev.conf` → `telegram-gallery-bot-dev`
-- Production uses: `nginx.conf` → `telegram-gallery-bot`
 
 ### Files Not Downloading
 
-**Check:**
-1. Downloads volume is mounted correctly
-2. File exists in container:
-   ```bash
-   docker-compose -f docker-compose.dev.yml exec nginx ls -la /usr/share/nginx/html/downloads/
-   ```
-3. Nginx has read permissions
+```bash
+# Check if file exists
+docker-compose exec nginx ls -la /usr/share/nginx/html/downloads/
 
----
+# Check nginx access logs
+docker-compose logs nginx | grep downloads
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Start dev mode: `docker-compose -f docker-compose.dev.yml up -d`
-3. Make changes (they auto-reload!)
-4. Test thoroughly
-5. Commit: `git commit -m 'Add feature'`
-6. Push and create PR
+# Check permissions
+docker-compose exec nginx ls -la /usr/share/nginx/html/
+```
 
 ---
 
 ## ❓ FAQ
 
-### Q: Do I need to rebuild after every code change?
-**A:** No! Use dev mode - code changes auto-reload in 1 second.
+### Q: How do I update the bot code?
+**A:** Pull changes and rebuild:
+```bash
+git pull
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+```
 
-### Q: What if I add a new npm package?
-**A:** Run `docker-compose -f docker-compose.dev.yml exec bot npm install` (no rebuild).
+### Q: How do I add a new site?
+**A:** Create a JSON strategy file in `strategies/`, then rebuild.
 
-### Q: When do I need to rebuild?
-**A:** Only when `Dockerfile` or system packages change (very rare).
+### Q: Can I use self-signed SSL certificates?
+**A:** Yes, but Cloudflare Origin CA certificates are recommended for production.
 
-### Q: Can I switch between dev and production?
-**A:** Yes! Just `down` one and `up` the other.
+### Q: How do I check if webhook is working?
+**A:** `curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo`
 
-### Q: How do I debug issues?
-**A:** Use `logs -f bot` or enter container with `exec bot sh`.
-
-### Q: Why separate nginx.conf and nginx.dev.conf?
-**A:** Different container names: `telegram-gallery-bot` (prod) vs `telegram-gallery-bot-dev` (dev).
-
-### Q: Do I need SSL for local development?
-**A:** Yes, if using webhook. Use Cloudflare Origin CA or self-signed certificates.
+### Q: How do I backup the bot?
+**A:** Backup `.env`, `ssl/`, and `strategies/` folders.
 
 ---
 
@@ -643,11 +425,10 @@ MIT License
 
 ## 🙏 Acknowledgments
 
-- [Telegraf](https://telegraf.js.org/) - Modern Telegram Bot Framework
+- [Telegraf](https://telegraf.js.org/) - Telegram Bot Framework
 - [Puppeteer](https://pptr.dev/) - Headless Chrome for Node.js
 - [jsdom](https://github.com/jsdom/jsdom/) - JavaScript implementation of web standards
 - [Docker](https://www.docker.com/) - Containerization platform
-- [Nodemon](https://nodemon.io/) - Auto-reload for Node.js
 - [Cloudflare](https://www.cloudflare.com/) - SSL and CDN
 
 ---
