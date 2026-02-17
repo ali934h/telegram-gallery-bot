@@ -77,8 +77,13 @@ class TelegramBot {
       // Multiple parts
       await ctx.reply(
         `📦 *File split into ${filePaths.length} parts*\n\n` +
-        `Download all parts, place them in one folder, and extract Part 1.\n` +
-        `WinRAR/7-Zip will automatically combine them.`,
+        `*How to extract:*\n` +
+        `1. Download all parts\n` +
+        `2. Place them in one folder\n` +
+        `3. On Windows CMD or PowerShell:\n` +
+        `\`\`\`\ncopy /b *.part1.zip+*.part2.zip output.zip\n\`\`\`\n` +
+        `4. Extract output.zip\n\n` +
+        `Or use 7-Zip/WinRAR to combine and extract.`,
         { parse_mode: 'Markdown' }
       );
 
