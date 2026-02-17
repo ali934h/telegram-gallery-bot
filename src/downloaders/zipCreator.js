@@ -2,11 +2,10 @@
  * ZIP Creator
  * Creates ZIP archives from downloaded images
  * Handles both single and multi-gallery archives
- * Supports automatic splitting for large files
+ * Supports automatic splitting for large files using manual binary splitting
  */
 
 const archiver = require('archiver');
-const splitFile = require('split-file');
 const fs = require('fs');
 const path = require('path');
 const Logger = require('../utils/logger');
@@ -71,7 +70,7 @@ class ZipCreator {
   }
 
   /**
-   * Split large ZIP file into smaller parts
+   * Split large ZIP file into smaller parts using binary splitting
    * @param {string} zipPath - Path to ZIP file
    * @param {number} maxSize - Maximum size per part in bytes
    * @returns {Promise<Array>} Array of part file paths
@@ -80,29 +79,36 @@ class ZipCreator {
     try {
       Logger.info(`Splitting ZIP file: ${path.basename(zipPath)}`);
       
-      // Split file using split-file library
-      const partNames = await splitFile.splitFileBySize(zipPath, maxSize);
+      const stats = await fs.promises.stat(zipPath);
+      const totalSize = stats.size;
+      const numParts = Math.ceil(totalSize / maxSize);
       
-      Logger.info(`ZIP split into ${partNames.length} parts`);
+      Logger.info(`Total size: ${FileManager.formatBytes(totalSize)}, splitting into ${numParts} parts`);
       
-      // Rename parts to WinRAR-compatible format (.part1.zip, .part2.zip, etc.)
-      const renamedParts = [];
+      const partPaths = [];
       const baseName = zipPath.replace(/\.zip$/, '');
       
-      for (let i = 0; i < partNames.length; i++) {
-        const oldPath = partNames[i];
-        const newPath = `${baseName}.part${i + 1}.zip`;
+      // Read the entire file
+      const fileBuffer = await fs.promises.readFile(zipPath);
+      
+      // Split into parts
+      for (let i = 0; i < numParts; i++) {
+        const start = i * maxSize;
+        const end = Math.min(start + maxSize, totalSize);
+        const partBuffer = fileBuffer.slice(start, end);
         
-        await fs.promises.rename(oldPath, newPath);
-        renamedParts.push(newPath);
-        Logger.debug(`Renamed: ${path.basename(oldPath)} -> ${path.basename(newPath)}`);
+        const partPath = `${baseName}.part${i + 1}.zip`;
+        await fs.promises.writeFile(partPath, partBuffer);
+        
+        partPaths.push(partPath);
+        Logger.debug(`Created part ${i + 1}/${numParts}: ${path.basename(partPath)} (${FileManager.formatBytes(partBuffer.length)})`);
       }
       
       // Delete original ZIP file
       await fs.promises.unlink(zipPath);
       Logger.debug('Original ZIP file deleted');
       
-      return renamedParts;
+      return partPaths;
     } catch (error) {
       Logger.error('Failed to split ZIP file', { error: error.message });
       throw error;
