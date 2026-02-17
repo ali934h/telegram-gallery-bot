@@ -69,8 +69,9 @@ class TelegramBot {
       const fileName = path.basename(filePath);
       const destPath = path.join(DOWNLOADS_DIR, fileName);
       
-      // Move file
-      await fs.promises.rename(filePath, destPath);
+      // Use copyFile + unlink instead of rename for cross-device compatibility
+      await fs.promises.copyFile(filePath, destPath);
+      await fs.promises.unlink(filePath);
       
       // Generate download URL
       const downloadUrl = `${DOWNLOAD_BASE_URL}/${fileName}`;
