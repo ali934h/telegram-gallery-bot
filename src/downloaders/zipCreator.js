@@ -80,15 +80,29 @@ class ZipCreator {
     try {
       Logger.info(`Splitting ZIP file: ${path.basename(zipPath)}`);
       
-      const names = await splitFile.splitFileBySize(zipPath, maxSize);
+      // Split file using split-file library
+      const partNames = await splitFile.splitFileBySize(zipPath, maxSize);
       
-      Logger.info(`ZIP split into ${names.length} parts`);
+      Logger.info(`ZIP split into ${partNames.length} parts`);
+      
+      // Rename parts to WinRAR-compatible format (.part1.zip, .part2.zip, etc.)
+      const renamedParts = [];
+      const baseName = zipPath.replace(/\.zip$/, '');
+      
+      for (let i = 0; i < partNames.length; i++) {
+        const oldPath = partNames[i];
+        const newPath = `${baseName}.part${i + 1}.zip`;
+        
+        await fs.promises.rename(oldPath, newPath);
+        renamedParts.push(newPath);
+        Logger.debug(`Renamed: ${path.basename(oldPath)} -> ${path.basename(newPath)}`);
+      }
       
       // Delete original ZIP file
       await fs.promises.unlink(zipPath);
       Logger.debug('Original ZIP file deleted');
       
-      return names;
+      return renamedParts;
     } catch (error) {
       Logger.error('Failed to split ZIP file', { error: error.message });
       throw error;
