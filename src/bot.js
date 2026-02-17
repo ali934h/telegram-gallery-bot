@@ -327,24 +327,28 @@ class TelegramBot {
       const strategy = strategyEngine.getStrategy(url);
       
       // Extract images
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '🔍 Extracting image URLs...'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '🔍 Extracting image URLs...'
+        );
+      });
       const imageUrls = await JsdomScraper.extractImages(url, strategy);
 
       if (imageUrls.length === 0) {
         throw new Error('No images found in gallery');
       }
 
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `✅ Found ${imageUrls.length} images\n📥 Downloading...`
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `✅ Found ${imageUrls.length} images\n📥 Downloading...`
+        );
+      });
 
       // Create temp directory
       tempDir = await FileManager.createTempDir('single_gallery');
@@ -357,13 +361,15 @@ class TelegramBot {
         5,
         (progress) => {
           if (progress.current % 5 === 0 || progress.current === progress.total) {
-            ctx.telegram.editMessageText(
-              ctx.chat.id,
-              statusMsg.message_id,
-              null,
-              `📥 Downloading: ${progress.current}/${progress.total}\n` +
-              `✅ Success: ${progress.success} | ❌ Failed: ${progress.failed}`
-            ).catch(() => {});
+            this.retryWithBackoff(async () => {
+              await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                statusMsg.message_id,
+                null,
+                `📥 Downloading: ${progress.current}/${progress.total}\n` +
+                `✅ Success: ${progress.success} | ❌ Failed: ${progress.failed}`
+              );
+            }).catch(() => {});
           }
         }
       );
@@ -373,21 +379,25 @@ class TelegramBot {
       }
 
       // Create 7z archive
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '📦 Creating archive...'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '📦 Creating archive...'
+        );
+      });
       archivePath = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
 
       // Send download link
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '🔗 Generating download link...'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '🔗 Generating download link...'
+        );
+      });
 
       const caption =
         `✅ *Download Complete!*\n\n` +
@@ -395,7 +405,9 @@ class TelegramBot {
         `📷 Images: ${downloadResult.success}/${downloadResult.total}`;
 
       await this.sendDownloadLink(ctx, archivePath, caption);
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      }).catch(() => {});
 
       // Cleanup temp directory
       await FileManager.deleteDir(tempDir);
@@ -407,12 +419,14 @@ class TelegramBot {
 
     } catch (error) {
       Logger.error('Single gallery processing failed', { error: error.message, url });
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Error: ${error.message}\n\nPlease try again.`
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `❌ Error: ${error.message}\n\nPlease try again.`
+        );
+      }).catch(() => {});
 
       if (tempDir) await FileManager.deleteDir(tempDir);
       if (archivePath) await FileManager.deleteFile(archivePath).catch(() => {});
@@ -437,24 +451,28 @@ class TelegramBot {
       const strategy = strategyEngine.getStrategy(url);
 
       // Extract gallery links
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '🌐 Opening page and extracting galleries...\nThis may take 1-2 minutes.'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '🌐 Opening page and extracting galleries...\nThis may take 1-2 minutes.'
+        );
+      });
       const galleryLinks = await PuppeteerScraper.extractGalleryLinks(url, strategy);
 
       if (galleryLinks.length === 0) {
         throw new Error('No galleries found on this page');
       }
 
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `✅ Found ${galleryLinks.length} galleries!\n\n🔍 Extracting images from each gallery...`
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `✅ Found ${galleryLinks.length} galleries!\n\n🔍 Extracting images from each gallery...`
+        );
+      });
 
       // Extract images from each gallery
       const galleries = [];
@@ -467,12 +485,14 @@ class TelegramBot {
           galleries.push({ name: galleryName, urls: imageUrls });
 
           if ((i + 1) % 5 === 0 || i === galleryLinks.length - 1) {
-            await ctx.telegram.editMessageText(
-              ctx.chat.id,
-              statusMsg.message_id,
-              null,
-              `🔍 Extracting images: ${i + 1}/${galleryLinks.length} galleries processed`
-            ).catch(() => {});
+            this.retryWithBackoff(async () => {
+              await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                statusMsg.message_id,
+                null,
+                `🔍 Extracting images: ${i + 1}/${galleryLinks.length} galleries processed`
+              );
+            }).catch(() => {});
           }
         } catch (error) {
           Logger.warn(`Failed to extract gallery: ${galleryUrl}`, { error: error.message });
@@ -481,15 +501,17 @@ class TelegramBot {
 
       const totalImages = galleries.reduce((sum, g) => sum + g.urls.length, 0);
 
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `✅ Extraction complete!\n\n` +
-        `📋 Galleries: ${galleries.length}\n` +
-        `📷 Total Images: ${totalImages}\n\n` +
-        `📥 Starting download...`
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `✅ Extraction complete!\n\n` +
+          `📋 Galleries: ${galleries.length}\n` +
+          `📷 Total Images: ${totalImages}\n\n` +
+          `📥 Starting download...`
+        );
+      });
 
       // Create temp directory
       tempDir = await FileManager.createTempDir('multi_gallery');
@@ -500,33 +522,39 @@ class TelegramBot {
         galleries,
         tempDir,
         (progress) => {
-          ctx.telegram.editMessageText(
-            ctx.chat.id,
-            statusMsg.message_id,
-            null,
-            `📥 Downloading gallery: ${progress.completedGalleries + 1}/${progress.totalGalleries}\n` +
-            `📋 Current: ${progress.galleryName}\n` +
-            `📷 Progress: ${progress.galleryProgress.current}/${progress.galleryProgress.total}`
-          ).catch(() => {});
+          this.retryWithBackoff(async () => {
+            await ctx.telegram.editMessageText(
+              ctx.chat.id,
+              statusMsg.message_id,
+              null,
+              `📥 Downloading gallery: ${progress.completedGalleries + 1}/${progress.totalGalleries}\n` +
+              `📋 Current: ${progress.galleryName}\n` +
+              `📷 Progress: ${progress.galleryProgress.current}/${progress.galleryProgress.total}`
+            );
+          }).catch(() => {});
         }
       );
 
       // Create 7z archive
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '📦 Creating archive... (This may take a few minutes)'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '📦 Creating archive... (This may take a few minutes)'
+        );
+      });
       archivePath = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
 
       // Send download link
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        '🔗 Generating download link...'
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          '🔗 Generating download link...'
+        );
+      });
 
       const caption =
         `✅ *Multi-Gallery Download Complete!*\n\n` +
@@ -534,7 +562,9 @@ class TelegramBot {
         `📷 Total Images: ${totalImages}`;
 
       await this.sendDownloadLink(ctx, archivePath, caption);
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      }).catch(() => {});
 
       // Cleanup temp directory
       await FileManager.deleteDir(tempDir);
@@ -546,12 +576,14 @@ class TelegramBot {
 
     } catch (error) {
       Logger.error('Multi-gallery processing failed', { error: error.message, url });
-      await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        statusMsg.message_id,
-        null,
-        `❌ Error: ${error.message}\n\nPlease try again.`
-      );
+      await this.retryWithBackoff(async () => {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          null,
+          `❌ Error: ${error.message}\n\nPlease try again.`
+        );
+      }).catch(() => {});
 
       if (tempDir) await FileManager.deleteDir(tempDir);
       if (archivePath) await FileManager.deleteFile(archivePath).catch(() => {});
