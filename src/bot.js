@@ -51,6 +51,35 @@ class TelegramBot {
   }
 
   /**
+   * Send file(s) to user (handles both single and split files)
+   */
+  async sendFiles(ctx, filePaths, caption) {
+    if (filePaths.length === 1) {
+      // Single file
+      await ctx.replyWithDocument(
+        { source: filePaths[0] },
+        { caption, parse_mode: 'Markdown' }
+      );
+    } else {
+      // Multiple parts
+      await ctx.reply(
+        `📦 *File split into ${filePaths.length} parts*\n\n` +
+        `Download all parts and extract Part 1 to get the complete archive.`,
+        { parse_mode: 'Markdown' }
+      );
+
+      for (let i = 0; i < filePaths.length; i++) {
+        await ctx.replyWithDocument(
+          { source: filePaths[i] },
+          { caption: `Part ${i + 1}/${filePaths.length}` }
+        );
+      }
+
+      await ctx.reply(caption, { parse_mode: 'Markdown' });
+    }
+  }
+
+  /**
    * Setup all bot handlers
    */
   setupHandlers() {
@@ -197,6 +226,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... Please wait.');
     let tempDir;
+    let zipPaths = [];
 
     try {
       // Get strategy
@@ -249,16 +279,16 @@ class TelegramBot {
         throw new Error('Failed to download any images');
       }
 
-      // Create ZIP
+      // Create ZIP (may be split)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
         '📦 Creating ZIP file...'
       );
-      const zipPath = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
+      zipPaths = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
 
-      // Send ZIP file
+      // Send ZIP file(s)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
@@ -266,23 +296,19 @@ class TelegramBot {
         '📤 Uploading...'
       );
 
-      await ctx.replyWithDocument(
-        { source: zipPath },
-        {
-          caption:
-            `✅ *Download Complete!*\n\n` +
-            `📋 Gallery: ${galleryName}\n` +
-            `📷 Images: ${downloadResult.success}/${downloadResult.total}\n` +
-            `📦 Size: ${await FileManager.getFileSize(zipPath).then(s => FileManager.formatBytes(s))}`,
-          parse_mode: 'Markdown'
-        }
-      );
+      const caption =
+        `✅ *Download Complete!*\n\n` +
+        `📋 Gallery: ${galleryName}\n` +
+        `📷 Images: ${downloadResult.success}/${downloadResult.total}`;
 
+      await this.sendFiles(ctx, zipPaths, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
       // Cleanup
       await FileManager.deleteDir(tempDir);
-      await FileManager.deleteFile(zipPath);
+      for (const zipPath of zipPaths) {
+        await FileManager.deleteFile(zipPath);
+      }
 
       session.state = STATE.IDLE;
       ctx.reply('Ready for next download!', this.getMainMenu());
@@ -299,6 +325,9 @@ class TelegramBot {
       if (tempDir) {
         await FileManager.deleteDir(tempDir);
       }
+      for (const zipPath of zipPaths) {
+        await FileManager.deleteFile(zipPath).catch(() => {});
+      }
 
       session.state = STATE.IDLE;
     }
@@ -313,6 +342,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... This may take a while.');
     let tempDir;
+    let zipPaths = [];
 
     try {
       // Get strategy
@@ -394,40 +424,36 @@ class TelegramBot {
         }
       );
 
-      // Create ZIP
+      // Create ZIP (may be split)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
         '📦 Creating ZIP file... (This may take a few minutes)'
       );
-      const zipPath = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
+      zipPaths = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
 
-      // Send ZIP file
+      // Send ZIP file(s)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📤 Uploading... (Large files may take time)'
+        '📤 Uploading...'
       );
 
-      await ctx.replyWithDocument(
-        { source: zipPath },
-        {
-          caption:
-            `✅ *Multi-Gallery Download Complete!*\n\n` +
-            `📋 Galleries: ${galleries.length}\n` +
-            `📷 Total Images: ${totalImages}\n` +
-            `📦 Size: ${await FileManager.getFileSize(zipPath).then(s => FileManager.formatBytes(s))}`,
-          parse_mode: 'Markdown'
-        }
-      );
+      const caption =
+        `✅ *Multi-Gallery Download Complete!*\n\n` +
+        `📋 Galleries: ${galleries.length}\n` +
+        `📷 Total Images: ${totalImages}`;
 
+      await this.sendFiles(ctx, zipPaths, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
       // Cleanup
       await FileManager.deleteDir(tempDir);
-      await FileManager.deleteFile(zipPath);
+      for (const zipPath of zipPaths) {
+        await FileManager.deleteFile(zipPath);
+      }
 
       session.state = STATE.IDLE;
       ctx.reply('Ready for next download!', this.getMainMenu());
@@ -443,6 +469,9 @@ class TelegramBot {
 
       if (tempDir) {
         await FileManager.deleteDir(tempDir);
+      }
+      for (const zipPath of zipPaths) {
+        await FileManager.deleteFile(zipPath).catch(() => {});
       }
 
       session.state = STATE.IDLE;
