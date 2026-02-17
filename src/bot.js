@@ -84,6 +84,42 @@ class TelegramBot {
   }
 
   /**
+   * Retry with exponential backoff
+   * @param {Function} fn - Function to retry
+   * @param {number} maxRetries - Maximum retry attempts
+   * @param {number} baseDelay - Base delay in ms
+   * @returns {Promise<any>}
+   */
+  async retryWithBackoff(fn, maxRetries = 5, baseDelay = 1000) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        // Check if it's a rate limit error
+        const isRateLimitError = error.message && (
+          error.message.includes('429') ||
+          error.message.includes('Too Many Requests') ||
+          error.message.includes('retry after')
+        );
+
+        if (!isRateLimitError || attempt === maxRetries) {
+          throw error;
+        }
+
+        // Extract retry delay from error if available
+        let retryDelay = baseDelay * Math.pow(2, attempt);
+        const retryMatch = error.message.match(/retry after (\d+)/);
+        if (retryMatch) {
+          retryDelay = Math.max(retryDelay, parseInt(retryMatch[1]) * 1000);
+        }
+
+        Logger.warn(`Rate limit hit, retrying in ${retryDelay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+  }
+
+  /**
    * Get or create user session
    */
   getUserSession(userId) {
@@ -104,22 +140,22 @@ class TelegramBot {
   }
 
   /**
-   * Send download link to user
+   * Send download link to user with retry logic
    * @param {Context} ctx - Telegram context
    * @param {string} archivePath - Path to archive file
    * @param {string} caption - Caption text
    */
   async sendDownloadLink(ctx, archivePath, caption) {
-    try {
-      // Get file size
-      const stats = fs.statSync(archivePath);
-      const fileSize = FileManager.formatBytes(stats.size);
-      const fileName = path.basename(archivePath);
-      
-      // Move to downloads directory
-      const downloadUrl = await this.moveToDownloads(archivePath);
-      
-      // Send download link
+    // Get file info first (before moving)
+    const stats = fs.statSync(archivePath);
+    const fileSize = FileManager.formatBytes(stats.size);
+    const fileName = path.basename(archivePath);
+    
+    // Move to downloads directory
+    const downloadUrl = await this.moveToDownloads(archivePath);
+    
+    // Send message with retry logic
+    await this.retryWithBackoff(async () => {
       await ctx.reply(
         `${caption}\n\n` +
         `📦 *File Ready!*\n\n` +
@@ -129,12 +165,9 @@ class TelegramBot {
         `⏱️ Link expires in 24 hours`,
         { parse_mode: 'Markdown', disable_web_page_preview: true }
       );
-      
-      Logger.info(`Download link sent: ${fileName}`);
-    } catch (error) {
-      Logger.error('Failed to send download link', { error: error.message });
-      throw error;
-    }
+    });
+    
+    Logger.info(`Download link sent: ${fileName}`);
   }
 
   /**
@@ -368,7 +401,9 @@ class TelegramBot {
       await FileManager.deleteDir(tempDir);
 
       session.state = STATE.IDLE;
-      ctx.reply('Ready for next download!', this.getMainMenu());
+      await this.retryWithBackoff(async () => {
+        await ctx.reply('Ready for next download!', this.getMainMenu());
+      });
 
     } catch (error) {
       Logger.error('Single gallery processing failed', { error: error.message, url });
@@ -505,7 +540,9 @@ class TelegramBot {
       await FileManager.deleteDir(tempDir);
 
       session.state = STATE.IDLE;
-      ctx.reply('Ready for next download!', this.getMainMenu());
+      await this.retryWithBackoff(async () => {
+        await ctx.reply('Ready for next download!', this.getMainMenu());
+      });
 
     } catch (error) {
       Logger.error('Multi-gallery processing failed', { error: error.message, url });
