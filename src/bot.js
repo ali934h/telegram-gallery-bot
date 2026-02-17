@@ -74,16 +74,19 @@ class TelegramBot {
         { caption, parse_mode: 'Markdown' }
       );
     } else {
-      // Multiple volumes (WinRAR/7-Zip compatible)
+      // Multiple volumes (7z format - WinRAR/7-Zip compatible)
       await ctx.reply(
         `📦 *Multi-volume archive (${filePaths.length} parts)*\n\n` +
         `*How to extract:*\n\n` +
-        `*With WinRAR/7-Zip:*\n` +
-        `1. Download all parts to same folder\n` +
-        `2. Right-click the .zip file (not .z01, .z02...)\n` +
-        `3. Extract - it will automatically use all volumes\n\n` +
-        `*With Command Line:*\n` +
-        `\`unzip archive.zip\` (automatically finds volumes)`,
+        `*Option 1 - With 7-Zip (Free):*\n` +
+        `1. Download all parts (.001, .002, .003...)\n` +
+        `2. Right-click the *.7z.001* file\n` +
+        `3. 7-Zip → Extract Here\n\n` +
+        `*Option 2 - With WinRAR:*\n` +
+        `1. Download all parts\n` +
+        `2. Right-click the *.7z.001* file\n` +
+        `3. Extract Here\n\n` +
+        `✅ Both tools automatically find all volumes!`,
         { parse_mode: 'Markdown' }
       );
 
@@ -127,16 +130,16 @@ class TelegramBot {
         '1. Click "📸 Single Gallery"\n' +
         '2. Send the gallery URL\n' +
         '3. Wait for download\n' +
-        '4. Receive ZIP file\n\n' +
+        '4. Receive 7z archive\n\n' +
         '*Multi Gallery Mode:*\n' +
         '1. Click "📚 Multi Gallery"\n' +
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive ZIP file(s)\n\n' +
+        '5. Receive 7z archive(s)\n\n' +
         '*Large Files:*\n' +
-        'Files over 45 MB are split into multiple volumes (.zip, .z01, .z02...).\n' +
-        'Download all parts and extract the .zip file with WinRAR/7-Zip.\n\n' +
+        'Files over 45 MB are split into volumes (.7z.001, .7z.002...).\n' +
+        'Download all parts and extract from .7z.001 with 7-Zip or WinRAR.\n\n' +
         '*Supported Sites:*\n' +
         strategyEngine.getSupportedDomains().map(d => `• ${d}`).join('\n'),
         { parse_mode: 'Markdown' }
@@ -184,13 +187,13 @@ class TelegramBot {
         '1. Click "📸 Single Gallery"\n' +
         '2. Send the gallery URL\n' +
         '3. Wait for download\n' +
-        '4. Receive ZIP file\n\n' +
+        '4. Receive 7z archive\n\n' +
         '*Multi Gallery Mode:*\n' +
         '1. Click "📚 Multi Gallery"\n' +
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive ZIP file(s)',
+        '5. Receive 7z archive(s)',
         { parse_mode: 'Markdown' }
       );
     });
@@ -249,7 +252,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... Please wait.');
     let tempDir;
-    let zipPaths = [];
+    let archivePaths = [];
 
     try {
       // Get strategy
@@ -302,16 +305,16 @@ class TelegramBot {
         throw new Error('Failed to download any images');
       }
 
-      // Create ZIP (may be split into volumes)
+      // Create 7z archive (may be split into volumes)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating ZIP archive...'
+        '📦 Creating 7z archive...'
       );
-      zipPaths = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
+      archivePaths = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
 
-      // Send ZIP file(s)
+      // Send archive file(s)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
@@ -324,13 +327,13 @@ class TelegramBot {
         `📋 Gallery: ${galleryName}\n` +
         `📷 Images: ${downloadResult.success}/${downloadResult.total}`;
 
-      await this.sendFiles(ctx, zipPaths, caption);
+      await this.sendFiles(ctx, archivePaths, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
       // Cleanup
       await FileManager.deleteDir(tempDir);
-      for (const zipPath of zipPaths) {
-        await FileManager.deleteFile(zipPath);
+      for (const archivePath of archivePaths) {
+        await FileManager.deleteFile(archivePath);
       }
 
       session.state = STATE.IDLE;
@@ -348,8 +351,8 @@ class TelegramBot {
       if (tempDir) {
         await FileManager.deleteDir(tempDir);
       }
-      for (const zipPath of zipPaths) {
-        await FileManager.deleteFile(zipPath).catch(() => {});
+      for (const archivePath of archivePaths) {
+        await FileManager.deleteFile(archivePath).catch(() => {});
       }
 
       session.state = STATE.IDLE;
@@ -365,7 +368,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... This may take a while.');
     let tempDir;
-    let zipPaths = [];
+    let archivePaths = [];
 
     try {
       // Get strategy
@@ -447,16 +450,16 @@ class TelegramBot {
         }
       );
 
-      // Create ZIP (may be split into volumes)
+      // Create 7z archive (may be split into volumes)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating ZIP archive... (This may take a few minutes)'
+        '📦 Creating 7z archive... (This may take a few minutes)'
       );
-      zipPaths = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
+      archivePaths = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
 
-      // Send ZIP file(s)
+      // Send archive file(s)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
@@ -469,13 +472,13 @@ class TelegramBot {
         `📋 Galleries: ${galleries.length}\n` +
         `📷 Total Images: ${totalImages}`;
 
-      await this.sendFiles(ctx, zipPaths, caption);
+      await this.sendFiles(ctx, archivePaths, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
       // Cleanup
       await FileManager.deleteDir(tempDir);
-      for (const zipPath of zipPaths) {
-        await FileManager.deleteFile(zipPath);
+      for (const archivePath of archivePaths) {
+        await FileManager.deleteFile(archivePath);
       }
 
       session.state = STATE.IDLE;
@@ -493,8 +496,8 @@ class TelegramBot {
       if (tempDir) {
         await FileManager.deleteDir(tempDir);
       }
-      for (const zipPath of zipPaths) {
-        await FileManager.deleteFile(zipPath).catch(() => {});
+      for (const archivePath of archivePaths) {
+        await FileManager.deleteFile(archivePath).catch(() => {});
       }
 
       session.state = STATE.IDLE;
