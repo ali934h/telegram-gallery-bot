@@ -2,115 +2,94 @@
  * ZIP Creator
  * Creates ZIP archives from downloaded images
  * Handles both single and multi-gallery archives
- * Supports automatic splitting for large files using manual binary splitting
+ * Supports automatic splitting using zip command for WinRAR compatibility
  */
 
-const archiver = require('archiver');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const Logger = require('../utils/logger');
 const FileManager = require('../utils/fileManager');
 
 // Maximum file size for Telegram (45 MB to be safe)
-const MAX_FILE_SIZE = 45 * 1024 * 1024; // 45 MB in bytes
+const MAX_FILE_SIZE_MB = 45;
 
 class ZipCreator {
   /**
-   * Create ZIP file from directory
+   * Create ZIP file using zip command with optional splitting
    * @param {string} sourceDir - Source directory to zip
    * @param {string} outputPath - Output ZIP file path
-   * @returns {Promise<Object>} Resolves with zip info {path, size}
+   * @param {boolean} enableSplit - Enable multi-volume splitting
+   * @returns {Promise<Array>} Array of created file paths
    */
-  static async createZip(sourceDir, outputPath) {
-    return new Promise((resolve, reject) => {
-      Logger.info(`Creating ZIP: ${path.basename(outputPath)}`);
-
-      // Create write stream
-      const output = fs.createWriteStream(outputPath);
-      const archive = archiver('zip', {
-        zlib: { level: 6 } // Compression level (0-9)
-      });
-
-      // Event handlers
-      output.on('close', () => {
-        const size = archive.pointer();
-        const sizeFormatted = FileManager.formatBytes(size);
-        Logger.info(`ZIP created successfully: ${sizeFormatted}`);
-        resolve({ path: outputPath, size });
-      });
-
-      output.on('error', (error) => {
-        Logger.error('Output stream error', { error: error.message });
-        reject(error);
-      });
-
-      archive.on('error', (error) => {
-        Logger.error('Archive error', { error: error.message });
-        reject(error);
-      });
-
-      archive.on('warning', (warning) => {
-        if (warning.code === 'ENOENT') {
-          Logger.warn('Archive warning', { warning: warning.message });
-        } else {
-          Logger.error('Archive warning', { warning: warning.message });
-          reject(warning);
-        }
-      });
-
-      // Pipe archive to output
-      archive.pipe(output);
-
-      // Add directory to archive
-      archive.directory(sourceDir, false);
-
-      // Finalize archive
-      archive.finalize();
-    });
-  }
-
-  /**
-   * Split large ZIP file into smaller parts using binary splitting
-   * @param {string} zipPath - Path to ZIP file
-   * @param {number} maxSize - Maximum size per part in bytes
-   * @returns {Promise<Array>} Array of part file paths
-   */
-  static async splitZipFile(zipPath, maxSize = MAX_FILE_SIZE) {
+  static async createZipWithCommand(sourceDir, outputPath, enableSplit = false) {
     try {
-      Logger.info(`Splitting ZIP file: ${path.basename(zipPath)}`);
+      Logger.info(`Creating ZIP: ${path.basename(outputPath)}`);
       
-      const stats = await fs.promises.stat(zipPath);
-      const totalSize = stats.size;
-      const numParts = Math.ceil(totalSize / maxSize);
+      const outputDir = path.dirname(outputPath);
+      const outputName = path.basename(outputPath, '.zip');
       
-      Logger.info(`Total size: ${FileManager.formatBytes(totalSize)}, splitting into ${numParts} parts`);
+      // Change to source directory for cleaner archive structure
+      const originalDir = process.cwd();
+      process.chdir(sourceDir);
       
-      const partPaths = [];
-      const baseName = zipPath.replace(/\.zip$/, '');
-      
-      // Read the entire file
-      const fileBuffer = await fs.promises.readFile(zipPath);
-      
-      // Split into parts
-      for (let i = 0; i < numParts; i++) {
-        const start = i * maxSize;
-        const end = Math.min(start + maxSize, totalSize);
-        const partBuffer = fileBuffer.slice(start, end);
+      try {
+        let command;
         
-        const partPath = `${baseName}.part${i + 1}.zip`;
-        await fs.promises.writeFile(partPath, partBuffer);
+        if (enableSplit) {
+          // Create multi-volume ZIP (compatible with WinRAR/7-Zip)
+          command = `zip -r -s ${MAX_FILE_SIZE_MB}m "${path.join(outputDir, outputName)}.zip" .`;
+          Logger.info(`Creating multi-volume ZIP with ${MAX_FILE_SIZE_MB}MB parts`);
+        } else {
+          // Create regular ZIP
+          command = `zip -r "${outputPath}" .`;
+        }
         
-        partPaths.push(partPath);
-        Logger.debug(`Created part ${i + 1}/${numParts}: ${path.basename(partPath)} (${FileManager.formatBytes(partBuffer.length)})`);
+        Logger.debug(`Executing: ${command}`);
+        execSync(command, { stdio: 'pipe' });
+        
+      } finally {
+        process.chdir(originalDir);
       }
       
-      // Delete original ZIP file
-      await fs.promises.unlink(zipPath);
-      Logger.debug('Original ZIP file deleted');
+      // Find all created files
+      const createdFiles = [];
       
-      return partPaths;
+      if (enableSplit) {
+        // Multi-volume: find .zip, .z01, .z02, etc.
+        const baseName = path.join(outputDir, outputName);
+        
+        // Check for main zip
+        if (fs.existsSync(`${baseName}.zip`)) {
+          createdFiles.push(`${baseName}.zip`);
+        }
+        
+        // Check for volumes (.z01, .z02, ...)
+        let volumeIndex = 1;
+        while (true) {
+          const volumePath = `${baseName}.z${String(volumeIndex).padStart(2, '0')}`;
+          if (fs.existsSync(volumePath)) {
+            createdFiles.push(volumePath);
+            volumeIndex++;
+          } else {
+            break;
+          }
+        }
+        
+        Logger.info(`Created ${createdFiles.length} volume(s)`);
+      } else {
+        // Single file
+        if (fs.existsSync(outputPath)) {
+          createdFiles.push(outputPath);
+          const stats = fs.statSync(outputPath);
+          Logger.info(`ZIP created successfully: ${FileManager.formatBytes(stats.size)}`);
+        }
+      }
+      
+      return createdFiles;
+      
     } catch (error) {
-      Logger.error('Failed to split ZIP file', { error: error.message });
+      Logger.error('Failed to create ZIP', { error: error.message });
       throw error;
     }
   }
@@ -119,27 +98,52 @@ class ZipCreator {
    * Create ZIP and split if necessary
    * @param {string} sourceDir - Source directory
    * @param {string} outputPath - Output ZIP path
-   * @returns {Promise<Array>} Array of file paths (single or multiple parts)
+   * @returns {Promise<Array>} Array of file paths (single or multiple volumes)
    */
   static async createAndSplitIfNeeded(sourceDir, outputPath) {
     try {
-      // Create ZIP
-      const { path: zipPath, size } = await this.createZip(sourceDir, outputPath);
-
-      // Check if splitting is needed
-      if (size > MAX_FILE_SIZE) {
-        Logger.info(`ZIP size (${FileManager.formatBytes(size)}) exceeds limit, splitting...`);
-        const parts = await this.splitZipFile(zipPath, MAX_FILE_SIZE);
-        return parts;
+      // Get estimated size first
+      const estimatedSize = await this.getDirectorySize(sourceDir);
+      const estimatedZipSize = estimatedSize * 0.85; // Approximate compression
+      const maxSizeBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
+      
+      if (estimatedZipSize > maxSizeBytes) {
+        Logger.info(
+          `Estimated ZIP size (${FileManager.formatBytes(estimatedZipSize)}) exceeds limit, ` +
+          `creating multi-volume archive...`
+        );
+        return await this.createZipWithCommand(sourceDir, outputPath, true);
+      } else {
+        Logger.info('Estimated ZIP size within limits, creating single file');
+        return await this.createZipWithCommand(sourceDir, outputPath, false);
       }
-
-      // No splitting needed
-      Logger.info('ZIP size within limits, no splitting needed');
-      return [zipPath];
+      
     } catch (error) {
       Logger.error('Failed to create and split ZIP', { error: error.message });
       throw error;
     }
+  }
+
+  /**
+   * Get total size of directory
+   * @param {string} dir - Directory path
+   * @returns {Promise<number>} Total size in bytes
+   */
+  static async getDirectorySize(dir) {
+    let totalSize = 0;
+    const items = await fs.promises.readdir(dir, { withFileTypes: true });
+
+    for (const item of items) {
+      const itemPath = path.join(dir, item.name);
+      if (item.isDirectory()) {
+        totalSize += await this.getDirectorySize(itemPath);
+      } else {
+        const stats = await fs.promises.stat(itemPath);
+        totalSize += stats.size;
+      }
+    }
+
+    return totalSize;
   }
 
   /**
@@ -185,25 +189,7 @@ class ZipCreator {
    */
   static async getEstimatedSize(sourceDir) {
     try {
-      // Get total size of all files
-      const getSize = async (dir) => {
-        let totalSize = 0;
-        const items = await fs.promises.readdir(dir, { withFileTypes: true });
-
-        for (const item of items) {
-          const itemPath = path.join(dir, item.name);
-          if (item.isDirectory()) {
-            totalSize += await getSize(itemPath);
-          } else {
-            const stats = await fs.promises.stat(itemPath);
-            totalSize += stats.size;
-          }
-        }
-
-        return totalSize;
-      };
-
-      const totalSize = await getSize(sourceDir);
+      const totalSize = await this.getDirectorySize(sourceDir);
       // ZIP compression typically achieves 10-20% reduction for images
       const estimatedZipSize = totalSize * 0.85;
 
