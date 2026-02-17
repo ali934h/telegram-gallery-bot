@@ -1,0 +1,11 @@
+{
+  "watch": ["src", "strategies"],
+  "ext": "js,json",
+  "ignore": ["node_modules/**", "temp/**", "downloads/**", "*.log"],
+  "delay": 500,
+  "verbose": true,
+  "legacyWatch": true,
+  "execMap": {
+    "js": "node"
+  }
+}
