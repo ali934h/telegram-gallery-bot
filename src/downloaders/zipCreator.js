@@ -1,8 +1,8 @@
 /**
- * Archive Creator (7z volumes)
- * Creates 7z multi-volume archives from downloaded images
+ * Archive Creator (7z - Single File)
+ * Creates 7z archives from downloaded images
  * Handles both single and multi-gallery archives
- * Uses 7z format for true WinRAR/7-Zip compatibility
+ * Outputs single file (no splitting) for direct download
  */
 
 const { execSync } = require('child_process');
@@ -11,102 +11,37 @@ const path = require('path');
 const Logger = require('../utils/logger');
 const FileManager = require('../utils/fileManager');
 
-// Maximum file size for Telegram (45 MB to be safe)
-const MAX_FILE_SIZE_MB = 45;
-
 class ZipCreator {
   /**
-   * Create 7z archive using 7z command with optional splitting
+   * Create 7z archive using 7z command (single file, no split)
    * @param {string} sourceDir - Source directory to archive
    * @param {string} outputPath - Output archive file path
-   * @param {boolean} enableSplit - Enable multi-volume splitting
-   * @returns {Promise<Array>} Array of created file paths
+   * @returns {Promise<string>} Path to created file
    */
-  static async createArchiveWithCommand(sourceDir, outputPath, enableSplit = false) {
+  static async createArchive(sourceDir, outputPath) {
     try {
-      const outputDir = path.dirname(outputPath);
-      const outputName = path.basename(outputPath, '.7z');
-      const archivePath = path.join(outputDir, `${outputName}.7z`);
+      Logger.info(`Creating 7z archive: ${path.basename(outputPath)}`);
       
-      Logger.info(`Creating 7z archive: ${path.basename(archivePath)}`);
-      
-      let command;
-      
-      if (enableSplit) {
-        // Create multi-volume 7z archive (compatible with WinRAR/7-Zip)
-        // Format: archive.7z.001, archive.7z.002, archive.7z.003...
-        command = `7z a -t7z -v${MAX_FILE_SIZE_MB}m "${archivePath}" "${sourceDir}"/*`;
-        Logger.info(`Creating multi-volume 7z with ${MAX_FILE_SIZE_MB}MB parts`);
-      } else {
-        // Create regular 7z archive
-        command = `7z a -t7z "${archivePath}" "${sourceDir}"/*`;
+      // Ensure output path ends with .7z
+      if (!outputPath.endsWith('.7z')) {
+        outputPath = `${outputPath}.7z`;
       }
+      
+      const command = `7z a -t7z "${outputPath}" "${sourceDir}"/*`;
       
       Logger.debug(`Executing: ${command}`);
       execSync(command, { stdio: 'pipe' });
       
-      // Find all created files
-      const createdFiles = [];
-      
-      if (enableSplit) {
-        // Multi-volume: find .7z.001, .7z.002, .7z.003, etc.
-        let volumeIndex = 1;
-        while (true) {
-          const volumePath = `${archivePath}.${String(volumeIndex).padStart(3, '0')}`;
-          if (fs.existsSync(volumePath)) {
-            createdFiles.push(volumePath);
-            volumeIndex++;
-          } else {
-            break;
-          }
-        }
-        
-        Logger.info(`Created ${createdFiles.length} volume(s)`);
+      if (fs.existsSync(outputPath)) {
+        const stats = fs.statSync(outputPath);
+        Logger.info(`Archive created successfully: ${FileManager.formatBytes(stats.size)}`);
+        return outputPath;
       } else {
-        // Single file
-        if (fs.existsSync(archivePath)) {
-          createdFiles.push(archivePath);
-          const stats = fs.statSync(archivePath);
-          Logger.info(`Archive created successfully: ${FileManager.formatBytes(stats.size)}`);
-        }
+        throw new Error('Archive file was not created');
       }
-      
-      return createdFiles;
       
     } catch (error) {
       Logger.error('Failed to create archive', { error: error.message });
-      throw error;
-    }
-  }
-
-  /**
-   * Create archive and split if necessary
-   * @param {string} sourceDir - Source directory
-   * @param {string} outputPath - Output archive path
-   * @returns {Promise<Array>} Array of file paths (single or multiple volumes)
-   */
-  static async createAndSplitIfNeeded(sourceDir, outputPath) {
-    try {
-      // Get estimated size first
-      const estimatedSize = await this.getDirectorySize(sourceDir);
-      // 7z typically achieves better compression than ZIP (especially for images)
-      // But we'll use conservative estimate
-      const estimatedArchiveSize = estimatedSize * 0.90;
-      const maxSizeBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
-      
-      if (estimatedArchiveSize > maxSizeBytes) {
-        Logger.info(
-          `Estimated archive size (${FileManager.formatBytes(estimatedArchiveSize)}) exceeds limit, ` +
-          `creating multi-volume archive...`
-        );
-        return await this.createArchiveWithCommand(sourceDir, outputPath, true);
-      } else {
-        Logger.info('Estimated archive size within limits, creating single file');
-        return await this.createArchiveWithCommand(sourceDir, outputPath, false);
-      }
-      
-    } catch (error) {
-      Logger.error('Failed to create and split archive', { error: error.message });
       throw error;
     }
   }
@@ -137,14 +72,14 @@ class ZipCreator {
    * Create archive from single gallery
    * @param {string} galleryDir - Gallery directory
    * @param {string} galleryName - Gallery name for archive filename
-   * @returns {Promise<Array>} Array of file paths
+   * @returns {Promise<string>} Path to created archive
    */
   static async createSingleGalleryZip(galleryDir, galleryName) {
     try {
       const archiveFilename = `${galleryName}_${Date.now()}.7z`;
       const archivePath = path.join(path.dirname(galleryDir), archiveFilename);
 
-      return await this.createAndSplitIfNeeded(galleryDir, archivePath);
+      return await this.createArchive(galleryDir, archivePath);
     } catch (error) {
       Logger.error('Failed to create single gallery archive', { error: error.message });
       throw error;
@@ -155,14 +90,14 @@ class ZipCreator {
    * Create archive from multiple galleries
    * @param {string} baseDir - Base directory containing gallery folders
    * @param {string} modelName - Model name for archive filename
-   * @returns {Promise<Array>} Array of file paths
+   * @returns {Promise<string>} Path to created archive
    */
   static async createMultiGalleryZip(baseDir, modelName) {
     try {
       const archiveFilename = `${modelName}_galleries_${Date.now()}.7z`;
       const archivePath = path.join(path.dirname(baseDir), archiveFilename);
 
-      return await this.createAndSplitIfNeeded(baseDir, archivePath);
+      return await this.createArchive(baseDir, archivePath);
     } catch (error) {
       Logger.error('Failed to create multi-gallery archive', { error: error.message });
       throw error;
