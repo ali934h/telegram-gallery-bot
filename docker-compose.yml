@@ -10,6 +10,7 @@ services:
       - .env
     volumes:
       - ./temp:/app/temp
+      - downloads:/app/downloads  # Shared volume for direct downloads
     networks:
       - bot-network
     restart: unless-stopped
@@ -28,7 +29,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/ssl/cloudflare:ro
+      - downloads:/usr/share/nginx/html/downloads:ro  # Serve files from shared volume
     networks:
       - bot-network
     depends_on:
@@ -40,4 +41,4 @@ networks:
     driver: bridge
 
 volumes:
-  temp:
+  downloads:  # Shared volume between bot and nginx
