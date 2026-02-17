@@ -64,7 +64,7 @@ class TelegramBot {
   }
 
   /**
-   * Send file(s) to user (handles both single and split files)
+   * Send file(s) to user (handles both single and multi-volume files)
    */
   async sendFiles(ctx, filePaths, caption) {
     if (filePaths.length === 1) {
@@ -74,23 +74,24 @@ class TelegramBot {
         { caption, parse_mode: 'Markdown' }
       );
     } else {
-      // Multiple parts
+      // Multiple volumes (WinRAR/7-Zip compatible)
       await ctx.reply(
-        `📦 *File split into ${filePaths.length} parts*\n\n` +
-        `*How to extract:*\n` +
-        `1. Download all parts\n` +
-        `2. Place them in one folder\n` +
-        `3. On Windows CMD or PowerShell:\n` +
-        `\`\`\`\ncopy /b *.part1.zip+*.part2.zip output.zip\n\`\`\`\n` +
-        `4. Extract output.zip\n\n` +
-        `Or use 7-Zip/WinRAR to combine and extract.`,
+        `📦 *Multi-volume archive (${filePaths.length} parts)*\n\n` +
+        `*How to extract:*\n\n` +
+        `*With WinRAR/7-Zip:*\n` +
+        `1. Download all parts to same folder\n` +
+        `2. Right-click the .zip file (not .z01, .z02...)\n` +
+        `3. Extract - it will automatically use all volumes\n\n` +
+        `*With Command Line:*\n` +
+        `\`unzip archive.zip\` (automatically finds volumes)`,
         { parse_mode: 'Markdown' }
       );
 
       for (let i = 0; i < filePaths.length; i++) {
+        const fileName = path.basename(filePaths[i]);
         await ctx.replyWithDocument(
           { source: filePaths[i] },
-          { caption: `Part ${i + 1}/${filePaths.length}` }
+          { caption: `Part ${i + 1}/${filePaths.length}: ${fileName}` }
         );
       }
 
@@ -132,7 +133,10 @@ class TelegramBot {
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive ZIP file\n\n' +
+        '5. Receive ZIP file(s)\n\n' +
+        '*Large Files:*\n' +
+        'Files over 45 MB are split into multiple volumes (.zip, .z01, .z02...).\n' +
+        'Download all parts and extract the .zip file with WinRAR/7-Zip.\n\n' +
         '*Supported Sites:*\n' +
         strategyEngine.getSupportedDomains().map(d => `• ${d}`).join('\n'),
         { parse_mode: 'Markdown' }
@@ -186,7 +190,7 @@ class TelegramBot {
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive ZIP file',
+        '5. Receive ZIP file(s)',
         { parse_mode: 'Markdown' }
       );
     });
@@ -298,12 +302,12 @@ class TelegramBot {
         throw new Error('Failed to download any images');
       }
 
-      // Create ZIP (may be split)
+      // Create ZIP (may be split into volumes)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating ZIP file...'
+        '📦 Creating ZIP archive...'
       );
       zipPaths = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
 
@@ -443,12 +447,12 @@ class TelegramBot {
         }
       );
 
-      // Create ZIP (may be split)
+      // Create ZIP (may be split into volumes)
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating ZIP file... (This may take a few minutes)'
+        '📦 Creating ZIP archive... (This may take a few minutes)'
       );
       zipPaths = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
 
