@@ -29,6 +29,9 @@ const userSessions = new Map();
 const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || '/app/downloads';
 const DOWNLOAD_BASE_URL = process.env.DOWNLOAD_BASE_URL || 'https://gallery.balad.dpdns.org/downloads';
 
+// Update interval for Telegram messages (5 seconds)
+const UPDATE_INTERVAL_MS = 5000;
+
 class TelegramBot {
   constructor(token) {
     this.bot = new Telegraf(token, {
@@ -355,13 +358,19 @@ class TelegramBot {
       tempDir = await FileManager.createTempDir('single_gallery');
       const galleryName = JsdomScraper.extractGalleryName(url);
 
+      // Time-based update tracking
+      let lastUpdateTime = 0;
+
       // Download images
       const downloadResult = await ImageDownloader.downloadImages(
         imageUrls,
         tempDir,
         5,
         (progress) => {
-          if (progress.current % 5 === 0 || progress.current === progress.total) {
+          const now = Date.now();
+          // Update every 5 seconds OR when complete
+          if (now - lastUpdateTime >= UPDATE_INTERVAL_MS || progress.current === progress.total) {
+            lastUpdateTime = now;
             this.retryWithBackoff(async () => {
               await ctx.telegram.editMessageText(
                 ctx.chat.id,
@@ -475,6 +484,9 @@ class TelegramBot {
         );
       });
 
+      // Time-based update tracking for extraction
+      let lastExtractionUpdateTime = 0;
+
       // Extract images from each gallery
       const galleries = [];
       for (let i = 0; i < galleryLinks.length; i++) {
@@ -485,7 +497,10 @@ class TelegramBot {
           const imageUrls = await JsdomScraper.extractImages(galleryUrl, strategy);
           galleries.push({ name: galleryName, urls: imageUrls });
 
-          if ((i + 1) % 5 === 0 || i === galleryLinks.length - 1) {
+          const now = Date.now();
+          // Update every 5 seconds OR when complete
+          if (now - lastExtractionUpdateTime >= UPDATE_INTERVAL_MS || i === galleryLinks.length - 1) {
+            lastExtractionUpdateTime = now;
             this.retryWithBackoff(async () => {
               await ctx.telegram.editMessageText(
                 ctx.chat.id,
@@ -518,21 +533,29 @@ class TelegramBot {
       tempDir = await FileManager.createTempDir('multi_gallery');
       const modelName = strategyEngine.extractDomain(url).split('.')[0];
 
+      // Time-based update tracking for downloads
+      let lastDownloadUpdateTime = 0;
+
       // Download all galleries
       await ImageDownloader.downloadMultipleGalleries(
         galleries,
         tempDir,
         (progress) => {
-          this.retryWithBackoff(async () => {
-            await ctx.telegram.editMessageText(
-              ctx.chat.id,
-              statusMsg.message_id,
-              null,
-              `📥 Downloading gallery: ${progress.completedGalleries + 1}/${progress.totalGalleries}\n` +
-              `📋 Current: ${progress.galleryName}\n` +
-              `📷 Progress: ${progress.galleryProgress.current}/${progress.galleryProgress.total}`
-            );
-          }).catch(() => {});
+          const now = Date.now();
+          // Update every 5 seconds
+          if (now - lastDownloadUpdateTime >= UPDATE_INTERVAL_MS) {
+            lastDownloadUpdateTime = now;
+            this.retryWithBackoff(async () => {
+              await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                statusMsg.message_id,
+                null,
+                `📥 Downloading gallery: ${progress.completedGalleries + 1}/${progress.totalGalleries}\n` +
+                `📋 Current: ${progress.galleryName}\n` +
+                `📷 Progress: ${progress.galleryProgress.current}/${progress.galleryProgress.total}`
+              );
+            }).catch(() => {});
+          }
         }
       );
 
