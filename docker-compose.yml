@@ -29,6 +29,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/ssl/cloudflare:ro  # SSL certificates from Cloudflare
       - downloads:/usr/share/nginx/html/downloads:ro  # Serve files from shared volume
     networks:
       - bot-network
