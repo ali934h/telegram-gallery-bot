@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-# Install Chromium and dependencies for Puppeteer
+# Install Chromium and dependencies for Puppeteer + zip for multi-volume archives
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     wget \
     ca-certificates \
+    zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Puppeteer to use installed Chromium
