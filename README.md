@@ -37,12 +37,14 @@ telegram-gallery-bot/
 │       ├── fileManager.js         # File management
 │       └── logger.js              # Logging utility
 ├── strategies/                     # Site configurations (JSON)
+├── ssl/                            # SSL certificates (not in repo)
 ├── temp/                           # Temporary files
 ├── docker-compose.yml             # Production mode
 ├── docker-compose.dev.yml         # Development mode (hot reload)
+├── nginx.conf                      # Production nginx config
+├── nginx.dev.conf                  # Development nginx config
 ├── nodemon.json                   # Nodemon configuration
 ├── Dockerfile
-├── nginx.conf
 └── .env
 ```
 
@@ -54,7 +56,8 @@ telegram-gallery-bot/
 
 - Docker and Docker Compose
 - A Telegram bot token (from [@BotFather](https://t.me/botfather))
-- Domain with SSL (optional, for webhook)
+- Domain with SSL (required for webhook)
+- Cloudflare Origin CA certificate (for HTTPS)
 
 ### Installation
 
@@ -64,13 +67,30 @@ git clone https://github.com/ali934h/telegram-gallery-bot.git
 cd telegram-gallery-bot
 ```
 
-2. **Configure environment variables**:
+2. **Setup SSL certificates**:
+```bash
+# Create ssl directory
+mkdir ssl
+
+# Get Cloudflare Origin CA certificate
+# Go to: Cloudflare Dashboard → SSL/TLS → Origin Server → Create Certificate
+# Download cert.pem and key.pem
+
+# Place certificates
+cp /path/to/cert.pem ssl/
+cp /path/to/key.pem ssl/
+
+# Secure permissions
+chmod 600 ssl/*.pem
+```
+
+3. **Configure environment variables**:
 ```bash
 cp .env.example .env
 nano .env  # Add your BOT_TOKEN and other settings
 ```
 
-3. **Choose your mode**:
+4. **Choose your mode**:
 
 #### 🔥 Development Mode (Hot Reload - Recommended for Development)
 ```bash
@@ -286,6 +306,23 @@ DOWNLOAD_BASE_URL=https://your-domain.com/downloads
 NODE_ENV=production
 ```
 
+### SSL Certificates Setup
+
+**For Cloudflare:**
+
+1. Go to Cloudflare Dashboard → SSL/TLS → Origin Server
+2. Click "Create Certificate"
+3. Choose:
+   - Private key type: RSA (2048)
+   - Certificate validity: 15 years
+   - Hostnames: `*.your-domain.com`, `your-domain.com`
+4. Click "Create"
+5. Download both:
+   - Origin Certificate → save as `ssl/cert.pem`
+   - Private Key → save as `ssl/key.pem`
+
+**Important:** Keep these files secure and never commit to git!
+
 ### Adding New Sites
 
 **Create a JSON file in `strategies/` directory:**
@@ -414,12 +451,19 @@ docker-compose ps
 
 1. **Create Droplet** with Docker (Ubuntu 22.04/24.04)
 2. **Configure DNS** in Cloudflare
-3. **Get SSL certificates** from Cloudflare
+3. **Get SSL certificates** from Cloudflare (see SSL Setup above)
 4. **Clone and configure**:
 ```bash
 git clone https://github.com/ali934h/telegram-gallery-bot.git
 cd telegram-gallery-bot
-nano .env  # Configure
+
+# Setup SSL
+mkdir ssl
+# Upload cert.pem and key.pem to ssl/
+
+# Configure environment
+cp .env.example .env
+nano .env  # Add BOT_TOKEN, WEBHOOK_DOMAIN, etc.
 ```
 
 5. **Start in production mode**:
@@ -480,6 +524,73 @@ curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
 
 ---
 
+## 🚨 Troubleshooting
+
+### Error 521: Web Server is Down
+
+**Symptoms:** Cloudflare shows "Error 521" when accessing download links.
+
+**Causes:**
+1. Nginx container is not running
+2. SSL certificates are missing or incorrectly mounted
+3. Wrong container name in nginx config
+
+**Solutions:**
+
+```bash
+# 1. Check container status
+docker-compose -f docker-compose.dev.yml ps
+
+# 2. Check nginx logs
+docker-compose -f docker-compose.dev.yml logs nginx
+
+# 3. Verify SSL certificates exist
+ls -la ssl/
+# Should show: cert.pem and key.pem
+
+# 4. Verify SSL mount in docker-compose
+cat docker-compose.dev.yml | grep ssl
+# Should show: - ./ssl:/etc/ssl/cloudflare:ro
+
+# 5. Restart services
+docker-compose -f docker-compose.dev.yml down
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+### Bot Container Unhealthy
+
+**Check logs:**
+```bash
+docker-compose -f docker-compose.dev.yml logs --tail=50 bot
+```
+
+**Common fixes:**
+- Missing environment variables in `.env`
+- Bot token invalid
+- Port 3000 already in use
+
+### Nginx Cannot Find Bot
+
+**Error:** `host not found in upstream "telegram-gallery-bot"`
+
+**Cause:** Wrong container name in nginx config.
+
+**Solution:**
+- Dev mode uses: `nginx.dev.conf` → `telegram-gallery-bot-dev`
+- Production uses: `nginx.conf` → `telegram-gallery-bot`
+
+### Files Not Downloading
+
+**Check:**
+1. Downloads volume is mounted correctly
+2. File exists in container:
+   ```bash
+   docker-compose -f docker-compose.dev.yml exec nginx ls -la /usr/share/nginx/html/downloads/
+   ```
+3. Nginx has read permissions
+
+---
+
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -508,6 +619,12 @@ curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
 ### Q: How do I debug issues?
 **A:** Use `logs -f bot` or enter container with `exec bot sh`.
 
+### Q: Why separate nginx.conf and nginx.dev.conf?
+**A:** Different container names: `telegram-gallery-bot` (prod) vs `telegram-gallery-bot-dev` (dev).
+
+### Q: Do I need SSL for local development?
+**A:** Yes, if using webhook. Use Cloudflare Origin CA or self-signed certificates.
+
 ---
 
 ## 📝 License
@@ -531,6 +648,7 @@ MIT License
 - [jsdom](https://github.com/jsdom/jsdom/) - JavaScript implementation of web standards
 - [Docker](https://www.docker.com/) - Containerization platform
 - [Nodemon](https://nodemon.io/) - Auto-reload for Node.js
+- [Cloudflare](https://www.cloudflare.com/) - SSL and CDN
 
 ---
 
