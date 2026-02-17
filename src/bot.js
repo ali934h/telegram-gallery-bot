@@ -354,17 +354,19 @@ class TelegramBot {
         );
       });
 
-      // Create temp directory
+      // Create temp directory and gallery subfolder
       tempDir = await FileManager.createTempDir('single_gallery');
       const galleryName = JsdomScraper.extractGalleryName(url);
+      const galleryDir = path.join(tempDir, galleryName);
+      await fs.promises.mkdir(galleryDir, { recursive: true });
 
       // Time-based update tracking
       let lastUpdateTime = 0;
 
-      // Download images
+      // Download images to gallery folder
       const downloadResult = await ImageDownloader.downloadImages(
         imageUrls,
-        tempDir,
+        galleryDir,
         5,
         (progress) => {
           const now = Date.now();
@@ -388,7 +390,7 @@ class TelegramBot {
         throw new Error('Failed to download any images');
       }
 
-      // Create 7z archive
+      // Create 7z archive from temp directory (which contains gallery folder)
       await this.retryWithBackoff(async () => {
         await ctx.telegram.editMessageText(
           ctx.chat.id,
