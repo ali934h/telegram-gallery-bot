@@ -5,6 +5,7 @@
 
 const { Telegraf, Markup } = require('telegraf');
 const path = require('path');
+const fs = require('fs');
 const Logger = require('./utils/logger');
 const FileManager = require('./utils/fileManager');
 const strategyEngine = require('./scrapers/strategyEngine');
@@ -24,6 +25,10 @@ const STATE = {
 // User sessions
 const userSessions = new Map();
 
+// Downloads directory
+const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || '/app/downloads';
+const DOWNLOAD_BASE_URL = process.env.DOWNLOAD_BASE_URL || 'https://gallery.balad.dpdns.org/downloads';
+
 class TelegramBot {
   constructor(token) {
     this.bot = new Telegraf(token, {
@@ -34,43 +39,47 @@ class TelegramBot {
       }
     });
     
-    // Increase timeout for large file uploads (5 minutes)
+    // Increase timeout
     this.bot.telegram.options = {
       ...this.bot.telegram.options,
       timeout: 300000 // 5 minutes
     };
     
     this.setupHandlers();
+    this.ensureDownloadsDir();
   }
 
   /**
-   * Retry helper for rate-limited requests
-   * @param {Function} fn - Async function to retry
-   * @param {number} maxRetries - Maximum number of retries
-   * @returns {Promise} Result of the function
+   * Ensure downloads directory exists
    */
-  async retryWithBackoff(fn, maxRetries = 5) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (error) {
-        // Check if it's a rate limit error
-        if (error.response?.error_code === 429) {
-          const retryAfter = error.response.parameters?.retry_after || 3;
-          Logger.warn(
-            `Rate limited (attempt ${attempt}/${maxRetries}), retrying after ${retryAfter}s...`,
-            { error_code: 429, retry_after: retryAfter }
-          );
-          
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-            continue;
-          }
-        }
-        
-        // If not rate limit or last attempt, throw error
-        throw error;
-      }
+  ensureDownloadsDir() {
+    if (!fs.existsSync(DOWNLOADS_DIR)) {
+      fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+      Logger.info(`Created downloads directory: ${DOWNLOADS_DIR}`);
+    }
+  }
+
+  /**
+   * Move file to downloads directory and generate download link
+   * @param {string} filePath - Source file path
+   * @returns {Promise<string>} Download URL
+   */
+  async moveToDownloads(filePath) {
+    try {
+      const fileName = path.basename(filePath);
+      const destPath = path.join(DOWNLOADS_DIR, fileName);
+      
+      // Move file
+      await fs.promises.rename(filePath, destPath);
+      
+      // Generate download URL
+      const downloadUrl = `${DOWNLOAD_BASE_URL}/${fileName}`;
+      
+      Logger.info(`File moved to downloads: ${fileName}`);
+      return downloadUrl;
+    } catch (error) {
+      Logger.error('Failed to move file to downloads', { error: error.message });
+      throw error;
     }
   }
 
@@ -95,49 +104,36 @@ class TelegramBot {
   }
 
   /**
-   * Send file(s) to user (handles both single and multi-volume files)
+   * Send download link to user
+   * @param {Context} ctx - Telegram context
+   * @param {string} archivePath - Path to archive file
+   * @param {string} caption - Caption text
    */
-  async sendFiles(ctx, filePaths, caption) {
-    if (filePaths.length === 1) {
-      // Single file with retry
-      await this.retryWithBackoff(() => 
-        ctx.replyWithDocument(
-          { source: filePaths[0] },
-          { caption, parse_mode: 'Markdown' }
-        )
+  async sendDownloadLink(ctx, archivePath, caption) {
+    try {
+      // Get file size
+      const stats = fs.statSync(archivePath);
+      const fileSize = FileManager.formatBytes(stats.size);
+      const fileName = path.basename(archivePath);
+      
+      // Move to downloads directory
+      const downloadUrl = await this.moveToDownloads(archivePath);
+      
+      // Send download link
+      await ctx.reply(
+        `${caption}\n\n` +
+        `📦 *File Ready!*\n\n` +
+        `📄 Filename: \`${fileName}\`\n` +
+        `💾 Size: ${fileSize}\n\n` +
+        `🔗 [Click here to download](${downloadUrl})\n\n` +
+        `⏱️ Link expires in 24 hours`,
+        { parse_mode: 'Markdown', disable_web_page_preview: true }
       );
-    } else {
-      // Multiple volumes (7z format - WinRAR/7-Zip compatible)
-      await this.retryWithBackoff(() =>
-        ctx.reply(
-          `📦 *Multi-volume archive (${filePaths.length} parts)*\n\n` +
-          `*How to extract:*\n\n` +
-          `*Option 1 - With 7-Zip (Free):*\n` +
-          `1. Download all parts (.001, .002, .003...)\n` +
-          `2. Right-click the *.7z.001* file\n` +
-          `3. 7-Zip → Extract Here\n\n` +
-          `*Option 2 - With WinRAR:*\n` +
-          `1. Download all parts\n` +
-          `2. Right-click the *.7z.001* file\n` +
-          `3. Extract Here\n\n` +
-          `✅ Both tools automatically find all volumes!`,
-          { parse_mode: 'Markdown' }
-        )
-      );
-
-      for (let i = 0; i < filePaths.length; i++) {
-        const fileName = path.basename(filePaths[i]);
-        await this.retryWithBackoff(() =>
-          ctx.replyWithDocument(
-            { source: filePaths[i] },
-            { caption: `Part ${i + 1}/${filePaths.length}: ${fileName}` }
-          )
-        );
-      }
-
-      await this.retryWithBackoff(() =>
-        ctx.reply(caption, { parse_mode: 'Markdown' })
-      );
+      
+      Logger.info(`Download link sent: ${fileName}`);
+    } catch (error) {
+      Logger.error('Failed to send download link', { error: error.message });
+      throw error;
     }
   }
 
@@ -169,16 +165,16 @@ class TelegramBot {
         '1. Click "📸 Single Gallery"\n' +
         '2. Send the gallery URL\n' +
         '3. Wait for download\n' +
-        '4. Receive 7z archive\n\n' +
+        '4. Receive direct download link\n\n' +
         '*Multi Gallery Mode:*\n' +
         '1. Click "📚 Multi Gallery"\n' +
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive 7z archive(s)\n\n' +
-        '*Large Files:*\n' +
-        'Files over 45 MB are split into volumes (.7z.001, .7z.002...).\n' +
-        'Download all parts and extract from .7z.001 with 7-Zip or WinRAR.\n\n' +
+        '5. Receive direct download link\n\n' +
+        '*Download Links:*\n' +
+        'Files are hosted on our server for 24 hours.\n' +
+        'No file size limits!\n\n' +
         '*Supported Sites:*\n' +
         strategyEngine.getSupportedDomains().map(d => `• ${d}`).join('\n'),
         { parse_mode: 'Markdown' }
@@ -226,13 +222,13 @@ class TelegramBot {
         '1. Click "📸 Single Gallery"\n' +
         '2. Send the gallery URL\n' +
         '3. Wait for download\n' +
-        '4. Receive 7z archive\n\n' +
+        '4. Receive direct download link\n\n' +
         '*Multi Gallery Mode:*\n' +
         '1. Click "📚 Multi Gallery"\n' +
         '2. Send the model page URL\n' +
         '3. Confirm number of galleries\n' +
         '4. Wait for download\n' +
-        '5. Receive 7z archive(s)',
+        '5. Receive direct download link',
         { parse_mode: 'Markdown' }
       );
     });
@@ -291,7 +287,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... Please wait.');
     let tempDir;
-    let archivePaths = [];
+    let archivePath;
 
     try {
       // Get strategy
@@ -327,7 +323,6 @@ class TelegramBot {
         tempDir,
         5,
         (progress) => {
-          // Update progress every 5 images
           if (progress.current % 5 === 0 || progress.current === progress.total) {
             ctx.telegram.editMessageText(
               ctx.chat.id,
@@ -335,7 +330,7 @@ class TelegramBot {
               null,
               `📥 Downloading: ${progress.current}/${progress.total}\n` +
               `✅ Success: ${progress.success} | ❌ Failed: ${progress.failed}`
-            ).catch(() => {}); // Ignore edit errors
+            ).catch(() => {});
           }
         }
       );
@@ -344,21 +339,21 @@ class TelegramBot {
         throw new Error('Failed to download any images');
       }
 
-      // Create 7z archive (may be split into volumes)
+      // Create 7z archive
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating 7z archive...'
+        '📦 Creating archive...'
       );
-      archivePaths = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
+      archivePath = await ZipCreator.createSingleGalleryZip(tempDir, galleryName);
 
-      // Send archive file(s)
+      // Send download link
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📤 Uploading... (Please wait, large files may take 1-2 minutes)'
+        '🔗 Generating download link...'
       );
 
       const caption =
@@ -366,14 +361,11 @@ class TelegramBot {
         `📋 Gallery: ${galleryName}\n` +
         `📷 Images: ${downloadResult.success}/${downloadResult.total}`;
 
-      await this.sendFiles(ctx, archivePaths, caption);
+      await this.sendDownloadLink(ctx, archivePath, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
-      // Cleanup
+      // Cleanup temp directory
       await FileManager.deleteDir(tempDir);
-      for (const archivePath of archivePaths) {
-        await FileManager.deleteFile(archivePath);
-      }
 
       session.state = STATE.IDLE;
       ctx.reply('Ready for next download!', this.getMainMenu());
@@ -387,12 +379,8 @@ class TelegramBot {
         `❌ Error: ${error.message}\n\nPlease try again.`
       );
 
-      if (tempDir) {
-        await FileManager.deleteDir(tempDir);
-      }
-      for (const archivePath of archivePaths) {
-        await FileManager.deleteFile(archivePath).catch(() => {});
-      }
+      if (tempDir) await FileManager.deleteDir(tempDir);
+      if (archivePath) await FileManager.deleteFile(archivePath).catch(() => {});
 
       session.state = STATE.IDLE;
     }
@@ -407,7 +395,7 @@ class TelegramBot {
 
     const statusMsg = await ctx.reply('⏳ Processing... This may take a while.');
     let tempDir;
-    let archivePaths = [];
+    let archivePath;
 
     try {
       // Get strategy
@@ -443,7 +431,6 @@ class TelegramBot {
           const imageUrls = await JsdomScraper.extractImages(galleryUrl, strategy);
           galleries.push({ name: galleryName, urls: imageUrls });
 
-          // Update progress
           if ((i + 1) % 5 === 0 || i === galleryLinks.length - 1) {
             await ctx.telegram.editMessageText(
               ctx.chat.id,
@@ -489,21 +476,21 @@ class TelegramBot {
         }
       );
 
-      // Create 7z archive (may be split into volumes)
+      // Create 7z archive
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📦 Creating 7z archive... (This may take a few minutes)'
+        '📦 Creating archive... (This may take a few minutes)'
       );
-      archivePaths = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
+      archivePath = await ZipCreator.createMultiGalleryZip(tempDir, modelName);
 
-      // Send archive file(s)
+      // Send download link
       await ctx.telegram.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📤 Uploading... (Please wait, large files may take 2-3 minutes)'
+        '🔗 Generating download link...'
       );
 
       const caption =
@@ -511,14 +498,11 @@ class TelegramBot {
         `📋 Galleries: ${galleries.length}\n` +
         `📷 Total Images: ${totalImages}`;
 
-      await this.sendFiles(ctx, archivePaths, caption);
+      await this.sendDownloadLink(ctx, archivePath, caption);
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
-      // Cleanup
+      // Cleanup temp directory
       await FileManager.deleteDir(tempDir);
-      for (const archivePath of archivePaths) {
-        await FileManager.deleteFile(archivePath);
-      }
 
       session.state = STATE.IDLE;
       ctx.reply('Ready for next download!', this.getMainMenu());
@@ -532,23 +516,18 @@ class TelegramBot {
         `❌ Error: ${error.message}\n\nPlease try again.`
       );
 
-      if (tempDir) {
-        await FileManager.deleteDir(tempDir);
-      }
-      for (const archivePath of archivePaths) {
-        await FileManager.deleteFile(archivePath).catch(() => {});
-      }
+      if (tempDir) await FileManager.deleteDir(tempDir);
+      if (archivePath) await FileManager.deleteFile(archivePath).catch(() => {});
 
       session.state = STATE.IDLE;
     }
   }
 
   /**
-   * Initialize bot (load strategies and start polling)
+   * Initialize bot
    */
   async initialize() {
     try {
-      // Load strategies
       await strategyEngine.loadStrategies();
       Logger.info('Bot initialized successfully');
     } catch (error) {
@@ -562,23 +541,18 @@ class TelegramBot {
    */
   async startWebhook(webhookDomain, path, port) {
     await this.initialize();
-    
-    // Set webhook
     await this.bot.telegram.setWebhook(`${webhookDomain}${path}`);
     Logger.info(`Webhook set: ${webhookDomain}${path}`);
-
     return this.bot;
   }
 
   /**
-   * Start bot with polling (for development)
+   * Start bot with polling
    */
   async startPolling() {
     await this.initialize();
     await this.bot.launch();
     Logger.info('Bot started with polling');
-
-    // Graceful shutdown
     process.once('SIGINT', () => this.bot.stop('SIGINT'));
     process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
   }
