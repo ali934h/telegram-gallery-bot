@@ -26,7 +26,20 @@ const userSessions = new Map();
 
 class TelegramBot {
   constructor(token) {
-    this.bot = new Telegraf(token);
+    this.bot = new Telegraf(token, {
+      telegram: {
+        apiRoot: 'https://api.telegram.org',
+        agent: null,
+        webhookReply: true
+      }
+    });
+    
+    // Increase timeout for large file uploads (5 minutes)
+    this.bot.telegram.options = {
+      ...this.bot.telegram.options,
+      timeout: 300000 // 5 minutes
+    };
+    
     this.setupHandlers();
   }
 
@@ -64,7 +77,8 @@ class TelegramBot {
       // Multiple parts
       await ctx.reply(
         `📦 *File split into ${filePaths.length} parts*\n\n` +
-        `Download all parts and extract Part 1 to get the complete archive.`,
+        `Download all parts, place them in one folder, and extract Part 1.\n` +
+        `WinRAR/7-Zip will automatically combine them.`,
         { parse_mode: 'Markdown' }
       );
 
@@ -293,7 +307,7 @@ class TelegramBot {
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📤 Uploading...'
+        '📤 Uploading... (Please wait, large files may take 1-2 minutes)'
       );
 
       const caption =
@@ -438,7 +452,7 @@ class TelegramBot {
         ctx.chat.id,
         statusMsg.message_id,
         null,
-        '📤 Uploading...'
+        '📤 Uploading... (Please wait, large files may take 2-3 minutes)'
       );
 
       const caption =
