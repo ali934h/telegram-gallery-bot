@@ -13,10 +13,11 @@ A professional Telegram bot for automated gallery image downloading from various
 - 🎯 **Strategy Pattern**: Add new sites without changing code
 - ⚡ **jsdom**: Fast HTML parsing for image extraction
 - 🌐 **Puppeteer**: Lazy-loading support for complex pages
-- 📦 **ZIP Output**: All images packaged in compressed archives
+- 📦 **7z Output**: All images packaged in compressed archives
 - 🐳 **Docker Ready**: Easy deployment and scaling
 - 🔒 **SSL Support**: Secure webhook with Cloudflare
 - 🔄 **Auto Cleanup**: Automatic temporary file management
+- 🔥 **Hot Reload**: Development mode with instant code changes
 
 ## 🏗️ Project Architecture
 
@@ -25,26 +26,27 @@ telegram-gallery-bot/
 ├── src/
 │   ├── index.js                    # Express server + Webhook
 │   ├── bot.js                      # Telegram bot logic
-│   ├── config/
-│   │   └── siteStrategies.json    # Site selector configurations
 │   ├── scrapers/
 │   │   ├── strategyEngine.js      # Strategy management
 │   │   ├── jsdomScraper.js        # Fast HTML parsing
 │   │   └── puppeteerScraper.js    # Lazy-loading support
 │   ├── downloaders/
 │   │   ├── imageDownloader.js     # Image downloading
-│   │   └── zipCreator.js          # ZIP creation
+│   │   └── zipCreator.js          # 7z creation
 │   └── utils/
 │       ├── fileManager.js         # File management
 │       └── logger.js              # Logging utility
+├── strategies/                     # Site configurations (JSON)
 ├── temp/                           # Temporary files
+├── docker-compose.yml             # Production mode
+├── docker-compose.dev.yml         # Development mode (hot reload)
+├── nodemon.json                   # Nodemon configuration
 ├── Dockerfile
-├── docker-compose.yml
 ├── nginx.conf
 └── .env
 ```
 
-## 🚀 Installation & Setup
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -52,7 +54,7 @@ telegram-gallery-bot/
 - A Telegram bot token (from [@BotFather](https://t.me/botfather))
 - Domain with SSL (optional, for webhook)
 
-### Installation Steps
+### Installation
 
 1. **Clone the repository**:
 ```bash
@@ -63,17 +65,81 @@ cd telegram-gallery-bot
 2. **Configure environment variables**:
 ```bash
 cp .env.example .env
-nano .env  # Edit and add your BOT_TOKEN
+nano .env  # Add your BOT_TOKEN and other settings
 ```
 
-3. **Run with Docker**:
+3. **Choose your mode**:
+
+#### 🔥 Development Mode (Hot Reload - Recommended for coding)
 ```bash
+# Pull latest changes
+git pull
+
+# Start with hot reload
+docker-compose -f docker-compose.dev.yml up -d
+
+# View logs
+docker-compose -f docker-compose.dev.yml logs -f bot
+```
+
+**✨ In dev mode:**
+- ✅ Changes in `src/` auto-reload (no rebuild needed!)
+- ✅ Changes in `strategies/` auto-reload
+- ✅ Just edit code and save - bot restarts automatically!
+- ⚡ Perfect for adding new sites or fixing bugs
+
+#### 🚀 Production Mode (Stable)
+```bash
+# Build and start
 docker-compose up -d
+
+# View logs
+docker-compose logs -f bot
 ```
 
-4. **View logs**:
+## 🔥 Development Workflow
+
+### Making Changes (No More Rebuilds!)
+
+1. **Start dev mode once**:
 ```bash
-docker-compose logs -f bot
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+2. **Edit any file** in `src/` or `strategies/`:
+```bash
+nano src/bot.js
+# or
+nano strategies/elitebabes.json
+```
+
+3. **Save the file** → Bot restarts automatically! ⚡
+
+4. **Check logs** to see restart:
+```bash
+docker-compose -f docker-compose.dev.yml logs -f bot
+# You'll see: [nodemon] restarting due to changes...
+```
+
+### Example: Adding a New Site
+
+**Old way (Production mode):** ❌
+```bash
+nano strategies/newsite.json     # Edit
+docker-compose down              # Stop
+docker-compose build --no-cache  # Rebuild (2-3 minutes)
+docker-compose up -d             # Start
+```
+
+**New way (Development mode):** ✅
+```bash
+nano strategies/newsite.json  # Edit and save
+# Bot auto-restarts in 1 second! 🚀
+```
+
+### Stop Development Mode
+```bash
+docker-compose -f docker-compose.dev.yml down
 ```
 
 ## ⚙️ Configuration
@@ -82,252 +148,161 @@ docker-compose logs -f bot
 
 ```env
 BOT_TOKEN=your_telegram_bot_token_here
-WEBHOOK_URL=https://your-domain.com
-PORT=3000
+WEBHOOK_DOMAIN=https://your-domain.com
+DOWNLOAD_BASE_URL=https://your-domain.com/downloads
 NODE_ENV=production
 ```
 
 ### Adding New Sites
 
-To add support for a new site, simply add an entry to `src/config/siteStrategies.json`:
+Create a JSON file in `strategies/` directory:
 
 ```json
 {
-  "example.com": {
-    "name": "ExampleSite",
-    "galleries": {
-      "selector": "a.gallery-link",
-      "attr": "href"
-    },
-    "images": {
-      "selector": "img.gallery-image",
-      "attr": "src",
-      "filterPatterns": ["thumb", "_small"]
-    }
+  "domain": "example.com",
+  "name": "ExampleSite",
+  "galleries": {
+    "selector": "a.gallery-link",
+    "attr": "href"
+  },
+  "images": {
+    "selector": "img.photo",
+    "attr": "src",
+    "filterPatterns": ["thumb", "preview"]
   }
 }
 ```
 
-**Fields explanation:**
-- `galleries.selector`: CSS selector for gallery links on model pages
-- `galleries.attr`: Attribute name to extract URL (usually `href`)
-- `images.selector`: CSS selector for image links in galleries
-- `images.attr`: Attribute name to extract image URL (`href` or `src`)
-- `filterPatterns`: Array of patterns to filter out thumbnails and low-quality images
+**In dev mode**, just save and the bot reloads! 🔥
 
 ## 📖 Usage
 
-1. Start the bot in Telegram: `/start`
-2. Choose a download mode:
-   - 📸 **Single Gallery**: Download one gallery
-   - 📚 **Multi Gallery**: Download all galleries from a model page
-3. Send the URL
-4. Wait for processing and download
-5. Receive your ZIP file! 🎉
+1. Start the bot: `/start`
+2. Choose mode:
+   - 📸 **Single Gallery**: One gallery
+   - 📚 **Multi Gallery**: All galleries from model page
+3. Send URL
+4. Download your 7z file! 🎉
 
-### Example Workflow
-
-**Single Gallery Mode:**
-```
-User: Click "📸 Single Gallery"
-Bot: "Please send the gallery URL"
-User: https://example.com/gallery/gallery-name
-Bot: ⏳ Processing...
-     🔍 Found 45 images
-     📥 Downloading... (45/45)
-     📦 Creating ZIP...
-     📤 Uploading...
-     ✅ Download Complete! [ZIP FILE]
-```
-
-**Multi Gallery Mode:**
-```
-User: Click "📚 Multi Gallery"
-Bot: "Please send the model page URL"
-User: https://example.com/model/model-name
-Bot: ⏳ Processing...
-     🌐 Extracting galleries...
-     ✅ Found 12 galleries!
-     📥 Downloading gallery 1/12...
-     ...
-     📦 Creating ZIP...
-     ✅ Multi-Gallery Download Complete! [ZIP FILE]
-```
-
-## 🐳 Docker Deployment
+## 🐳 Docker Commands
 
 ### Development Mode
 ```bash
-docker-compose up
+# Start
+docker-compose -f docker-compose.dev.yml up -d
+
+# Logs
+docker-compose -f docker-compose.dev.yml logs -f bot
+
+# Stop
+docker-compose -f docker-compose.dev.yml down
+
+# Restart (if needed)
+docker-compose -f docker-compose.dev.yml restart bot
 ```
 
 ### Production Mode
 ```bash
+# Start
 docker-compose up -d
-```
 
-### Stop and Remove
-```bash
+# Rebuild after major changes
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+
+# Logs
+docker-compose logs -f bot
+
+# Stop
 docker-compose down
 ```
 
-### Rebuild After Changes
-```bash
-docker-compose up -d --build
-```
-
-### View Logs
-```bash
-# All services
-docker-compose logs -f
-
-# Bot only
-docker-compose logs -f bot
-
-# Nginx only
-docker-compose logs -f nginx
-```
-
-## 🌐 Production Setup
+## 🌐 Production Deployment
 
 ### With DigitalOcean + Cloudflare
 
-1. **Create a Droplet** with Docker Marketplace Image (Ubuntu 22.04/24.04)
-2. **Configure DNS** in Cloudflare (A Record pointing to your Droplet IP)
-3. **Get Origin Certificate** from Cloudflare SSL/TLS settings
-4. **Place certificates** in `ssl/` directory:
-   - `ssl/cert.pem` (Cloudflare Origin Certificate)
-   - `ssl/key.pem` (Private Key)
-5. **Clone repository** on your server
-6. **Configure `.env`** with your settings
-7. **Start services**:
+1. **Create Droplet** with Docker (Ubuntu 22.04/24.04)
+2. **Configure DNS** in Cloudflare
+3. **Get SSL certificates** from Cloudflare
+4. **Clone and configure**:
+```bash
+git clone https://github.com/ali934h/telegram-gallery-bot.git
+cd telegram-gallery-bot
+nano .env  # Configure
+```
+
+5. **Start in production mode**:
 ```bash
 docker-compose up -d
 ```
 
-8. **Set webhook**:
+6. **Set webhook**:
 ```bash
-curl -X POST https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook \
-  -d "url=https://your-domain.com/webhook/<YOUR_BOT_TOKEN>"
+curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook \
+  -d "url=https://your-domain.com/webhook/<TOKEN>"
 ```
 
-9. **Verify webhook**:
-```bash
-curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
-```
+## 🔧 Tech Stack
 
-## 🔧 Development
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Run in development mode (polling)
-NODE_ENV=development npm run dev
-```
-
-### Code Structure
-
-- **Strategy Pattern**: Each site has its own configuration - no code changes needed
-- **Modular Design**: Clear separation of concerns
-- **Error Handling**: Comprehensive error handling at all levels
-- **Logging**: Detailed logging for debugging and monitoring
-
-### Tech Stack
-
-- **Node.js 20 LTS**: Runtime environment
+- **Node.js 20 LTS**: Runtime
 - **Telegraf**: Telegram Bot Framework
-- **Express**: Web server for webhooks
-- **jsdom**: Fast HTML parsing
-- **Puppeteer**: Headless Chrome for lazy-loading
-- **Axios**: HTTP requests
-- **Archiver**: ZIP file creation
+- **Express**: Webhook server
+- **jsdom**: HTML parsing
+- **Puppeteer**: Headless browser
+- **Axios**: HTTP client
+- **7zip**: Archive creation
 - **Docker**: Containerization
-- **Nginx**: Reverse proxy with SSL
+- **Nginx**: Reverse proxy
+- **Nodemon**: Hot reload (dev)
 
-## 📦 Features in Detail
+## 📦 Features
 
-### Single Gallery Mode
-- Fast image extraction using jsdom
-- Concurrent downloads (5 parallel)
-- Progress updates every 5 images
-- Automatic thumbnail filtering
-- ZIP compression and upload
+### Rate Limit Protection
+- Time-based Telegram updates (every 5 seconds)
+- Automatic retry with exponential backoff
+- No more "Too Many Requests" errors
 
-### Multi Gallery Mode
-- Puppeteer for lazy-loading support
-- Auto-scroll to load all galleries
-- Batch processing of galleries
-- Individual progress tracking per gallery
-- Organized folder structure in ZIP
+### Cross-Device File Operations
+- Uses `copyFile + unlink` instead of `rename`
+- Works with Docker volumes on different filesystems
+- Reliable file moving between temp and downloads
 
-### File Management
-- Unique temporary directories per download
-- Automatic cleanup of old files (1 hour)
-- Size estimation before ZIP creation
-- Human-readable size formatting
-
-### Error Handling
-- Retry logic for failed downloads
-- Graceful degradation on partial failures
-- User-friendly error messages
-- Detailed logging for debugging
+### Development Experience
+- 🔥 Hot reload with nodemon
+- 📁 Bind mounts for instant code updates
+- 🚀 No rebuild needed for code changes
+- ⚡ 1-second restart time
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to:
-- Report bugs
-- Suggest new features
-- Add support for new sites
-- Improve documentation
-- Submit pull requests
-
-### How to Contribute
-
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
+2. Start dev mode: `docker-compose -f docker-compose.dev.yml up -d`
+3. Make your changes (they auto-reload!)
+4. Test thoroughly
+5. Commit: `git commit -m 'Add feature'`
+6. Push and create PR
 
 ## 📝 License
 
-This project is licensed under the MIT License.
+MIT License
 
 ## 👨‍💻 Author
 
 **Ali Hosseini**
 - GitHub: [@ali934h](https://github.com/ali934h)
 - Website: [alihosseini.dev](https://alihosseini.dev)
-- Bio: Front-end Developer from Tehran
 
 ## 🙏 Acknowledgments
 
-- [Telegraf](https://telegraf.js.org/) - Modern Telegram Bot Framework
-- [Puppeteer](https://pptr.dev/) - Headless Chrome for Node.js
-- [jsdom](https://github.com/jsdom/jsdom) - JavaScript implementation of web standards
-- [Docker](https://www.docker.com/) - Containerization platform
-- [Cloudflare](https://www.cloudflare.com/) - SSL and DNS services
-
-## 📊 Project Status
-
-- ✅ Phase 1: Project setup and Docker configuration - **Complete**
-- ✅ Phase 2: Core functionality implementation - **Complete**
-- ⏳ Phase 3: Production deployment - **In Progress**
+- [Telegraf](https://telegraf.js.org/)
+- [Puppeteer](https://pptr.dev/)
+- [jsdom](https://github.com/jsdom/jsdom)
+- [Docker](https://www.docker.com/)
+- [Nodemon](https://nodemon.io/)
 
 ---
 
-⭐ If you find this project helpful, please consider giving it a star!
-
-## 📞 Support
-
-If you need help or have questions:
-- Open an issue on GitHub
-- Check existing issues for solutions
-- Read the documentation carefully
-
----
+⭐ Star this repo if you find it helpful!
 
 **Made with ❤️ and Node.js**
