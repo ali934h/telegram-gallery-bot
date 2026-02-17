@@ -44,6 +44,37 @@ class TelegramBot {
   }
 
   /**
+   * Retry helper for rate-limited requests
+   * @param {Function} fn - Async function to retry
+   * @param {number} maxRetries - Maximum number of retries
+   * @returns {Promise} Result of the function
+   */
+  async retryWithBackoff(fn, maxRetries = 5) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        // Check if it's a rate limit error
+        if (error.response?.error_code === 429) {
+          const retryAfter = error.response.parameters?.retry_after || 3;
+          Logger.warn(
+            `Rate limited (attempt ${attempt}/${maxRetries}), retrying after ${retryAfter}s...`,
+            { error_code: 429, retry_after: retryAfter }
+          );
+          
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            continue;
+          }
+        }
+        
+        // If not rate limit or last attempt, throw error
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Get or create user session
    */
   getUserSession(userId) {
@@ -68,37 +99,45 @@ class TelegramBot {
    */
   async sendFiles(ctx, filePaths, caption) {
     if (filePaths.length === 1) {
-      // Single file
-      await ctx.replyWithDocument(
-        { source: filePaths[0] },
-        { caption, parse_mode: 'Markdown' }
+      // Single file with retry
+      await this.retryWithBackoff(() => 
+        ctx.replyWithDocument(
+          { source: filePaths[0] },
+          { caption, parse_mode: 'Markdown' }
+        )
       );
     } else {
       // Multiple volumes (7z format - WinRAR/7-Zip compatible)
-      await ctx.reply(
-        `📦 *Multi-volume archive (${filePaths.length} parts)*\n\n` +
-        `*How to extract:*\n\n` +
-        `*Option 1 - With 7-Zip (Free):*\n` +
-        `1. Download all parts (.001, .002, .003...)\n` +
-        `2. Right-click the *.7z.001* file\n` +
-        `3. 7-Zip → Extract Here\n\n` +
-        `*Option 2 - With WinRAR:*\n` +
-        `1. Download all parts\n` +
-        `2. Right-click the *.7z.001* file\n` +
-        `3. Extract Here\n\n` +
-        `✅ Both tools automatically find all volumes!`,
-        { parse_mode: 'Markdown' }
+      await this.retryWithBackoff(() =>
+        ctx.reply(
+          `📦 *Multi-volume archive (${filePaths.length} parts)*\n\n` +
+          `*How to extract:*\n\n` +
+          `*Option 1 - With 7-Zip (Free):*\n` +
+          `1. Download all parts (.001, .002, .003...)\n` +
+          `2. Right-click the *.7z.001* file\n` +
+          `3. 7-Zip → Extract Here\n\n` +
+          `*Option 2 - With WinRAR:*\n` +
+          `1. Download all parts\n` +
+          `2. Right-click the *.7z.001* file\n` +
+          `3. Extract Here\n\n` +
+          `✅ Both tools automatically find all volumes!`,
+          { parse_mode: 'Markdown' }
+        )
       );
 
       for (let i = 0; i < filePaths.length; i++) {
         const fileName = path.basename(filePaths[i]);
-        await ctx.replyWithDocument(
-          { source: filePaths[i] },
-          { caption: `Part ${i + 1}/${filePaths.length}: ${fileName}` }
+        await this.retryWithBackoff(() =>
+          ctx.replyWithDocument(
+            { source: filePaths[i] },
+            { caption: `Part ${i + 1}/${filePaths.length}: ${fileName}` }
+          )
         );
       }
 
-      await ctx.reply(caption, { parse_mode: 'Markdown' });
+      await this.retryWithBackoff(() =>
+        ctx.reply(caption, { parse_mode: 'Markdown' })
+      );
     }
   }
 
